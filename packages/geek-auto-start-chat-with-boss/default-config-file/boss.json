@@ -42,9 +42,11 @@
   "blockCompanyNameRegExpStr": "",
   "blockCompanyKeywordList": [],
   "blockCompanyKeywordExcludeList": [],
+  "blockCompanyKeywordMatchMode": "contains",
   "blockCompanyNameRegMatchStrategy": 3,
   "blockJobKeywordList": [],
   "blockJobKeywordExcludeList": [],
+  "blockJobKeywordMatchMode": "contains",
   "blockJobKeywordMatchFields": ["jobName", "jobType", "jobDesc"],
   "blockJobKeywordMatchStrategy": 3,
   "fieldsForUseCommonConfig": {}

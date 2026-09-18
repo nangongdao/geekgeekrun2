@@ -137,6 +137,25 @@
             />
           </div>
         </el-form-item>
+        <el-form-item
+          v-if="formContent.blockCompanyKeywordText?.trim()"
+          prop="blockCompanyKeywordMatchMode"
+          mb0
+          mt6px
+        >
+          <div font-size-12px flex flex-items-center gap-10px w-full>
+            <span white-space-nowrap>匹配模式：</span>
+            <el-radio-group v-model="formContent.blockCompanyKeywordMatchMode" size="small">
+              <el-radio
+                v-for="item in keywordMatchModeOptionList"
+                :key="item.value"
+                :label="item.value"
+                >{{ item.name }}</el-radio
+              >
+            </el-radio-group>
+            <span color-gray>{{ describeKeywordMatchMode(formContent.blockCompanyKeywordMatchMode) }}</span>
+          </div>
+        </el-form-item>
         <div class="h-1px bg-#f0f0f0" mt16px mb8px />
         <div
           ref="blockJobKeywordSectionEl"
@@ -152,7 +171,8 @@
           <div mb6px>
             不期望投递职位<b color-orange>关键词</b><br /><span font-size-12px
               ><b color-orange>逗号分隔</b>，不区分大小写；职位名称 / 类型 /
-              描述中包含任一关键词即视为不期望投递；输入框留空表示不筛选；<span color-orange
+              描述中<b color-orange>按下方匹配模式</b>命中任一关键词即视为不期望投递；输入框留空表示不筛选；<span
+                color-orange
                 >优先级高于下方“期望职位信息”</span
               ></span
             >
@@ -230,6 +250,25 @@
                 )
               "
             />
+          </div>
+        </el-form-item>
+        <el-form-item
+          v-if="formContent.blockJobKeywordText?.trim()"
+          prop="blockJobKeywordMatchMode"
+          mb0
+          mt6px
+        >
+          <div font-size-12px flex flex-items-center gap-10px w-full>
+            <span white-space-nowrap>匹配模式：</span>
+            <el-radio-group v-model="formContent.blockJobKeywordMatchMode" size="small">
+              <el-radio
+                v-for="item in keywordMatchModeOptionList"
+                :key="item.value"
+                :label="item.value"
+                >{{ item.name }}</el-radio
+              >
+            </el-radio-group>
+            <span color-gray>{{ describeKeywordMatchMode(formContent.blockJobKeywordMatchMode) }}</span>
           </div>
         </el-form-item>
         <div class="h-1px bg-#f0f0f0" mt16px mb16px />
@@ -740,6 +779,11 @@ import {
   readBlockJobKeywordText,
   readBlockJobKeywordExcludeText,
   readBlockJobKeywordMatchFields,
+  readBlockCompanyKeywordMatchMode,
+  readBlockJobKeywordMatchMode,
+  describeKeywordMatchMode,
+  keywordMatchModeOptionList,
+  DEFAULT_KEYWORD_MATCH_MODE,
   serializeBlockKeywordFields
 } from '../MainLayout/GeekAutoStartChatWithBoss/common'
 import { computed, ref } from 'vue'
@@ -764,8 +808,10 @@ const formContent = ref({
   expectSalaryLow: null,
   blockCompanyKeywordText: '',
   blockCompanyKeywordExcludeText: '',
+  blockCompanyKeywordMatchMode: DEFAULT_KEYWORD_MATCH_MODE,
   blockJobKeywordText: '',
   blockJobKeywordExcludeText: '',
+  blockJobKeywordMatchMode: DEFAULT_KEYWORD_MATCH_MODE,
   blockJobKeywordMatchFields: [...DEFAULT_JOB_KEYWORD_MATCH_FIELDS]
 })
 
@@ -895,9 +941,13 @@ ipcRenderer.invoke('fetch-config-file-content').then((res) => {
   formContent.value.blockCompanyKeywordText = readBlockCompanyKeywordText(commonJobConditionConfig)
   formContent.value.blockCompanyKeywordExcludeText =
     readBlockCompanyKeywordExcludeText(commonJobConditionConfig)
+  formContent.value.blockCompanyKeywordMatchMode =
+    readBlockCompanyKeywordMatchMode(commonJobConditionConfig)
   formContent.value.blockJobKeywordText = readBlockJobKeywordText(commonJobConditionConfig)
   formContent.value.blockJobKeywordExcludeText =
     readBlockJobKeywordExcludeText(commonJobConditionConfig)
+  formContent.value.blockJobKeywordMatchMode =
+    readBlockJobKeywordMatchMode(commonJobConditionConfig)
   formContent.value.blockJobKeywordMatchFields =
     readBlockJobKeywordMatchFields(commonJobConditionConfig)
 })

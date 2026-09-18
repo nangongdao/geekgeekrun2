@@ -3,13 +3,47 @@ import sampleCompanyList from '@geekgeekrun/geek-auto-start-chat-with-boss/defau
 import {
   JOB_KEYWORD_MATCH_FIELDS,
   DEFAULT_JOB_KEYWORD_MATCH_FIELDS,
+  KEYWORD_MATCH_MODES,
+  DEFAULT_KEYWORD_MATCH_MODE,
+  normalizeKeywordMatchMode,
   keywordListToText,
   normalizeKeywordList,
   convertLegacyRegExpStrToKeywordList
 } from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
 import { nextTick } from 'vue'
 
-export { JOB_KEYWORD_MATCH_FIELDS, DEFAULT_JOB_KEYWORD_MATCH_FIELDS, keywordListToText }
+export {
+  JOB_KEYWORD_MATCH_FIELDS,
+  DEFAULT_JOB_KEYWORD_MATCH_FIELDS,
+  DEFAULT_KEYWORD_MATCH_MODE,
+  keywordListToText
+}
+
+/**
+ * 关键词匹配模式的选项，直接来自 job-filter.mjs（三端共用的唯一事实源），
+ * 不在界面上另写一份，避免核心流程与配置界面各说各话。
+ */
+export const keywordMatchModeOptionList = KEYWORD_MATCH_MODES.map((it) => ({
+  name: it.label,
+  value: it.key,
+  description: it.description
+}))
+
+export function readBlockCompanyKeywordMatchMode(config) {
+  return normalizeKeywordMatchMode(config?.blockCompanyKeywordMatchMode)
+}
+
+export function readBlockJobKeywordMatchMode(config) {
+  return normalizeKeywordMatchMode(config?.blockJobKeywordMatchMode)
+}
+
+/**
+ * 当前模式的说明文案，用于在配置界面解释“精准匹配到底怎么切词”。
+ */
+export function describeKeywordMatchMode(value) {
+  const mode = normalizeKeywordMatchMode(value)
+  return KEYWORD_MATCH_MODES.find((it) => it.key === mode)?.description ?? ''
+}
 
 /**
  * 从配置文件里读出“不期望投递公司”，给文本框用。

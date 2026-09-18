@@ -58,7 +58,10 @@ import {
 import { getLastUsedAndAvailableBrowser } from '../../DOWNLOAD_DEPENDENCIES/utils/browser-history'
 import { waitForCommonJobConditionDone } from '../../../features/common-job-condition'
 import { ensureConfigFileExist } from '@geekgeekrun/geek-auto-start-chat-with-boss/runtime-file-utils.mjs'
-import { normalizeKeywordList } from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
+import {
+  normalizeKeywordList,
+  normalizeKeywordMatchMode
+} from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
 
 export default function initIpc() {
   ipcMain.handle('save-config-file-from-ui', async (ev, payload) => {
@@ -179,6 +182,11 @@ export default function initIpc() {
         payload.blockCompanyKeywordExcludeList
       )
     }
+    if (hasOwn(payload, 'blockCompanyKeywordMatchMode')) {
+      bossConfig.blockCompanyKeywordMatchMode = normalizeKeywordMatchMode(
+        payload.blockCompanyKeywordMatchMode
+      )
+    }
     if (hasOwn(payload, 'blockCompanyNameRegMatchStrategy')) {
       bossConfig.blockCompanyNameRegMatchStrategy = payload.blockCompanyNameRegMatchStrategy
     }
@@ -188,6 +196,9 @@ export default function initIpc() {
     }
     if (hasOwn(payload, 'blockJobKeywordExcludeList')) {
       bossConfig.blockJobKeywordExcludeList = normalizeKeywordList(payload.blockJobKeywordExcludeList)
+    }
+    if (hasOwn(payload, 'blockJobKeywordMatchMode')) {
+      bossConfig.blockJobKeywordMatchMode = normalizeKeywordMatchMode(payload.blockJobKeywordMatchMode)
     }
     if (hasOwn(payload, 'blockJobKeywordMatchFields')) {
       bossConfig.blockJobKeywordMatchFields = payload.blockJobKeywordMatchFields

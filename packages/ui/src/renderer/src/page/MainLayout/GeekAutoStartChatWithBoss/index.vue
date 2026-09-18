@@ -369,7 +369,7 @@
                   ></el-tooltip
                 ><br /><span font-size-12px
                   ><b color-orange>逗号分隔</b
-                  >，不区分大小写；公司名称包含任一关键词即视为不期望投递；输入框留空表示不筛选；<span
+                  >，不区分大小写；公司名称<b color-orange>按下方匹配模式</b>命中任一关键词即视为不期望投递；输入框留空表示不筛选；<span
                     color-orange
                     >优先级高于上方“期望投递公司”</span
                   ></span
@@ -505,6 +505,48 @@
                     />
                   </el-form-item>
                 </div>
+                <div
+                  v-if="
+                    (!useCommonConfigForCompanyBlockKeyword
+                      ? formContent
+                      : commonJobConditionConfig
+                    ).blockCompanyKeywordText?.trim()
+                  "
+                  font-size-12px
+                  flex
+                  flex-items-center
+                  gap-10px
+                  mt6px
+                >
+                  <span white-space-nowrap>匹配模式：</span>
+                  <el-radio-group
+                    v-if="!useCommonConfigForCompanyBlockKeyword"
+                    v-model="formContent.blockCompanyKeywordMatchMode"
+                    size="small"
+                  >
+                    <el-radio
+                      v-for="item in keywordMatchModeOptionList"
+                      :key="item.value"
+                      :label="item.value"
+                      >{{ item.name }}</el-radio
+                    >
+                  </el-radio-group>
+                  <el-radio-group
+                    v-else
+                    inert
+                    disabled
+                    size="small"
+                    :model-value="commonJobConditionConfig.blockCompanyKeywordMatchMode"
+                  >
+                    <el-radio
+                      v-for="item in keywordMatchModeOptionList"
+                      :key="item.value"
+                      :label="item.value"
+                      >{{ item.name }}</el-radio
+                    >
+                  </el-radio-group>
+                  <span color-gray>{{ describeKeywordMatchMode(formContent.blockCompanyKeywordMatchMode) }}</span>
+                </div>
               </div>
               <div
                 :style="{
@@ -565,12 +607,14 @@
               <div mb6px>
                 不期望投递职位<b color-orange>关键词</b><br /><span font-size-12px
                   ><b color-orange>逗号分隔</b>，不区分大小写；职位名称 / 类型 /
-                  描述中包含任一关键词即视为不期望投递，直接跳过；输入框留空表示不筛选；<span
+                  描述中<b color-orange>按下方匹配模式</b>命中任一关键词即视为不期望投递，直接跳过；输入框留空表示不筛选；<span
                     color-orange
                     >优先级高于下方“期望职位信息”正则</span
                   ><br />命中职位名称的职位会在列表阶段就被跳过，不会点开详情；<span color-orange
                     >排除词</span
-                  >可放行误伤（例如屏蔽“外包”、但把“非外包”填进排除词）</span
+                  >可放行误伤（例如屏蔽“外包”、但把“非外包”填进排除词）；<span color-orange
+                    >精准匹配</span
+                  >可避免“拼接命中”（例如“前端”不再命中“资深前端”）</span
                 >
               </div>
               <el-dropdown
@@ -742,6 +786,48 @@
                       placeholder="职位信息命中这些词时不屏蔽"
                     />
                   </el-form-item>
+                </div>
+                <div
+                  v-if="
+                    (!useCommonConfigForJobBlockKeyword
+                      ? formContent
+                      : commonJobConditionConfig
+                    ).blockJobKeywordText?.trim()
+                  "
+                  font-size-12px
+                  flex
+                  flex-items-center
+                  gap-10px
+                  mt6px
+                >
+                  <span white-space-nowrap>匹配模式：</span>
+                  <el-radio-group
+                    v-if="!useCommonConfigForJobBlockKeyword"
+                    v-model="formContent.blockJobKeywordMatchMode"
+                    size="small"
+                  >
+                    <el-radio
+                      v-for="item in keywordMatchModeOptionList"
+                      :key="item.value"
+                      :label="item.value"
+                      >{{ item.name }}</el-radio
+                    >
+                  </el-radio-group>
+                  <el-radio-group
+                    v-else
+                    inert
+                    disabled
+                    size="small"
+                    :model-value="commonJobConditionConfig.blockJobKeywordMatchMode"
+                  >
+                    <el-radio
+                      v-for="item in keywordMatchModeOptionList"
+                      :key="item.value"
+                      :label="item.value"
+                      >{{ item.name }}</el-radio
+                    >
+                  </el-radio-group>
+                  <span color-gray>{{ describeKeywordMatchMode(formContent.blockJobKeywordMatchMode) }}</span>
                 </div>
               </div>
               <div
@@ -2056,6 +2142,11 @@ import {
   readBlockJobKeywordText,
   readBlockJobKeywordExcludeText,
   readBlockJobKeywordMatchFields,
+  readBlockCompanyKeywordMatchMode,
+  readBlockJobKeywordMatchMode,
+  describeKeywordMatchMode,
+  keywordMatchModeOptionList,
+  DEFAULT_KEYWORD_MATCH_MODE,
   serializeBlockKeywordFields
 } from './common'
 const { ipcRenderer } = window.electron
@@ -2113,11 +2204,15 @@ const formContent = ref({
   blockCompanyKeywordText: '',
   // 公司排除词（命中则不屏蔽，逗号分隔文本；保存时转为 blockCompanyKeywordExcludeList）
   blockCompanyKeywordExcludeText: '',
+  // 公司关键词的匹配模式：contains（默认）| exact，见 job-filter.mjs
+  blockCompanyKeywordMatchMode: DEFAULT_KEYWORD_MATCH_MODE,
   blockCompanyNameRegMatchStrategy: MarkAsNotSuitOp.NO_OP,
   // 不期望投递职位（关键词，逗号分隔文本；保存时转为 blockJobKeywordList）
   blockJobKeywordText: '',
   // 职位排除词（命中则不屏蔽，逗号分隔文本；保存时转为 blockJobKeywordExcludeList）
   blockJobKeywordExcludeText: '',
+  // 职位关键词的匹配模式：contains（默认）| exact
+  blockJobKeywordMatchMode: DEFAULT_KEYWORD_MATCH_MODE,
   blockJobKeywordMatchFields: [...DEFAULT_JOB_KEYWORD_MATCH_FIELDS],
   blockJobKeywordMatchStrategy: MarkAsNotSuitOp.NO_OP,
   fieldsForUseCommonConfig: {}
@@ -2282,12 +2377,16 @@ electron.ipcRenderer.invoke('fetch-config-file-content').then((res) => {
   formContent.value.blockCompanyKeywordExcludeText = readBlockCompanyKeywordExcludeText(
     res.config['boss.json']
   )
+  formContent.value.blockCompanyKeywordMatchMode = readBlockCompanyKeywordMatchMode(
+    res.config['boss.json']
+  )
   formContent.value.blockCompanyNameRegMatchStrategy =
     res.config['boss.json'].blockCompanyNameRegMatchStrategy ?? MarkAsNotSuitOp.NO_OP
   formContent.value.blockJobKeywordText = readBlockJobKeywordText(res.config['boss.json'])
   formContent.value.blockJobKeywordExcludeText = readBlockJobKeywordExcludeText(
     res.config['boss.json']
   )
+  formContent.value.blockJobKeywordMatchMode = readBlockJobKeywordMatchMode(res.config['boss.json'])
   formContent.value.blockJobKeywordMatchFields = readBlockJobKeywordMatchFields(
     res.config['boss.json']
   )
@@ -2315,8 +2414,14 @@ electron.ipcRenderer.invoke('fetch-config-file-content').then((res) => {
     blockCompanyKeywordExcludeText: readBlockCompanyKeywordExcludeText(
       res.config['common-job-condition-config.json']
     ),
+    blockCompanyKeywordMatchMode: readBlockCompanyKeywordMatchMode(
+      res.config['common-job-condition-config.json']
+    ),
     blockJobKeywordText: readBlockJobKeywordText(res.config['common-job-condition-config.json']),
     blockJobKeywordExcludeText: readBlockJobKeywordExcludeText(
+      res.config['common-job-condition-config.json']
+    ),
+    blockJobKeywordMatchMode: readBlockJobKeywordMatchMode(
       res.config['common-job-condition-config.json']
     ),
     blockJobKeywordMatchFields: readBlockJobKeywordMatchFields(
@@ -2335,6 +2440,27 @@ const jobSourceFormItemSectionEl = ref()
 const jobDetailRegExpSectionEl = ref()
 const blockCompanyKeywordSectionEl = ref()
 const blockJobKeywordSectionEl = ref()
+
+/**
+ * 「公司 / 职位屏蔽是否改用公共配置」的判断集中在这里。
+ *
+ * 模板里原本到处直接写 `formContent.fieldsForUseCommonConfig.blockXxx`，而这个字段的推断类型是
+ * `{}`，每写一次就多一个 TS2339。新增控件时复用这两个 computed，既少写重复表达式，
+ * 也不会因为多写两处判断而把类型错误基线抬高。
+ */
+const useCommonConfigForCompanyBlockKeyword = computed(
+  () =>
+    Boolean(
+      (formContent.value.fieldsForUseCommonConfig as Record<string, unknown>)
+        ?.blockCompanyNameRegExpStr
+    )
+)
+const useCommonConfigForJobBlockKeyword = computed(
+  () =>
+    Boolean(
+      (formContent.value.fieldsForUseCommonConfig as Record<string, unknown>)?.blockJobKeyword
+    )
+)
 const formRules = {
   expectJobNameRegExpStr: {
     trigger: 'blur',
@@ -2775,8 +2901,10 @@ const unListenCommonJobConditionConfig = ipcRenderer.on(
       expectCompanies: config?.expectCompanies?.map((it) => it.trim())?.join(',') ?? '',
       blockCompanyKeywordText: readBlockCompanyKeywordText(config),
       blockCompanyKeywordExcludeText: readBlockCompanyKeywordExcludeText(config),
+      blockCompanyKeywordMatchMode: readBlockCompanyKeywordMatchMode(config),
       blockJobKeywordText: readBlockJobKeywordText(config),
       blockJobKeywordExcludeText: readBlockJobKeywordExcludeText(config),
+      blockJobKeywordMatchMode: readBlockJobKeywordMatchMode(config),
       blockJobKeywordMatchFields: readBlockJobKeywordMatchFields(config)
     }
   }
@@ -2820,13 +2948,18 @@ const fillCommonConfigField = (field) => {
       break
     }
     case 'blockCompanyKeyword': {
-      fieldsToReplace = ['blockCompanyKeywordText', 'blockCompanyKeywordExcludeText']
+      fieldsToReplace = [
+        'blockCompanyKeywordText',
+        'blockCompanyKeywordExcludeText',
+        'blockCompanyKeywordMatchMode'
+      ]
       break
     }
     case 'blockJobKeyword': {
       fieldsToReplace = [
         'blockJobKeywordText',
         'blockJobKeywordExcludeText',
+        'blockJobKeywordMatchMode',
         'blockJobKeywordMatchFields'
       ]
       break

@@ -1,7 +1,10 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
 import { writeConfigFile } from '@geekgeekrun/geek-auto-start-chat-with-boss/runtime-file-utils.mjs'
-import { normalizeKeywordList } from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
+import {
+  normalizeKeywordList,
+  normalizeKeywordMatchMode
+} from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
 
 export let commonJobConditionConfigWindow: BrowserWindow | null = null
 export function createCommonJobConditionConfigWindow(
@@ -61,6 +64,14 @@ export function createCommonJobConditionConfigWindow(
     }
     if (Object.hasOwn(payload ?? {}, 'blockJobKeywordExcludeList')) {
       payload.blockJobKeywordExcludeList = normalizeKeywordList(payload.blockJobKeywordExcludeList)
+    }
+    if (Object.hasOwn(payload ?? {}, 'blockCompanyKeywordMatchMode')) {
+      payload.blockCompanyKeywordMatchMode = normalizeKeywordMatchMode(
+        payload.blockCompanyKeywordMatchMode
+      )
+    }
+    if (Object.hasOwn(payload ?? {}, 'blockJobKeywordMatchMode')) {
+      payload.blockJobKeywordMatchMode = normalizeKeywordMatchMode(payload.blockJobKeywordMatchMode)
     }
     await writeConfigFile('common-job-condition-config.json', payload)
     commonJobConditionConfigWindow!.close()

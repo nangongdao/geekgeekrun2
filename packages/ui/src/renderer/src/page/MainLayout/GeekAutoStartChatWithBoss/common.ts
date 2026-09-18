@@ -1,6 +1,54 @@
 import { SalaryCalculateWay, JobDetailRegExpMatchLogic } from '@geekgeekrun/sqlite-plugin/src/enums'
 import sampleCompanyList from '@geekgeekrun/geek-auto-start-chat-with-boss/default-config-file/sample-company-list.json'
+import {
+  JOB_KEYWORD_MATCH_FIELDS,
+  DEFAULT_JOB_KEYWORD_MATCH_FIELDS,
+  keywordListToText,
+  normalizeKeywordList,
+  convertLegacyRegExpStrToKeywordList
+} from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
 import { nextTick } from 'vue'
+
+export { JOB_KEYWORD_MATCH_FIELDS, DEFAULT_JOB_KEYWORD_MATCH_FIELDS, keywordListToText }
+
+/**
+ * 从配置文件里读出“不期望投递公司”，给文本框用。
+ * 旧版只有正则时，能转换的就转成关键词展示；转不了的原样展示，由用户自己改成关键词。
+ */
+export function readBlockCompanyKeywordText(config) {
+  const keywordList = normalizeKeywordList(config?.blockCompanyKeywordList)
+  if (keywordList.length) {
+    return keywordListToText(keywordList)
+  }
+  const legacy = config?.blockCompanyNameRegExpStr ?? ''
+  if (!legacy.trim()) {
+    return ''
+  }
+  const converted = convertLegacyRegExpStrToKeywordList(legacy)
+  return converted ? keywordListToText(converted) : legacy
+}
+
+export function readBlockJobKeywordText(config) {
+  return keywordListToText(config?.blockJobKeywordList)
+}
+
+/**
+ * 排除词：“命中屏蔽词、但同时命中排除词”的职位 / 公司会被放行，
+ * 用来消解误伤（例如屏蔽“外包”，但希望放行“非外包”）。
+ */
+export function readBlockCompanyKeywordExcludeText(config) {
+  return keywordListToText(config?.blockCompanyKeywordExcludeList)
+}
+
+export function readBlockJobKeywordExcludeText(config) {
+  return keywordListToText(config?.blockJobKeywordExcludeList)
+}
+
+export function readBlockJobKeywordMatchFields(config) {
+  const allowed = new Set(DEFAULT_JOB_KEYWORD_MATCH_FIELDS)
+  const fields = (config?.blockJobKeywordMatchFields ?? []).filter((it) => allowed.has(it))
+  return fields.length ? fields : [...DEFAULT_JOB_KEYWORD_MATCH_FIELDS]
+}
 
 export function isJobDetailRegExpEmpty({ formContent }) {
   return [
@@ -125,25 +173,33 @@ export function getRuleOfExpectJobDescRegExpStr({ gtagRenderer, jobDetailRegExpS
   }
 }
 
-export function getRuleOfBlockCompanyNameRegExpStr({
-  gtagRenderer,
-  blockCompanyNameRegExpSectionEl
-}) {
+/**
+ * 关键词文本框的校验：单个关键词太短（一个字符）几乎一定会误伤，直接拒绝。
+ * kind = 'exclude' 时文案换成“误放行”，因为排除词写太短会把该屏蔽的职位放进来。
+ */
+export function getRuleOfBlockKeywordText({ gtagRenderer, sectionEl, tag, kind = 'block' }) {
   return (_, value, cb) => {
-    if (!value) {
+    const keywordList = normalizeKeywordList(value)
+    if (!keywordList.length) {
       cb()
-      gtagRenderer('empty_reg_exp_for_bcn')
+      gtagRenderer(`empty_keyword_for_${tag}`)
       return
     }
-    try {
-      new RegExp(value, 'ig')
-      gtagRenderer('valid_reg_exp_for_bcn', { v: value })
-      cb()
-    } catch (err) {
-      cb(new Error(`正则无效：${err?.message}`))
-      blockCompanyNameRegExpSectionEl.value?.scrollIntoViewIfNeeded()
-      gtagRenderer('invalid_reg_exp_for_bcn', { v: value })
+    const tooShort = keywordList.filter((it) => it.length < 2)
+    if (tooShort.length) {
+      cb(
+        new Error(
+          kind === 'exclude'
+            ? `排除词“${tooShort.join('，')}”太短，容易把本该屏蔽的职位放行，请至少填写 2 个字符`
+            : `关键词“${tooShort.join('，')}”太短，很容易误伤，请至少填写 2 个字符`
+        )
+      )
+      sectionEl?.value?.scrollIntoViewIfNeeded?.()
+      gtagRenderer(`too_short_keyword_for_${tag}`, { v: tooShort.join(',') })
+      return
     }
+    gtagRenderer(`valid_keyword_for_${tag}`, { count: keywordList.length })
+    cb()
   }
 }
 
@@ -182,18 +238,41 @@ export const expectCompanyTemplateList = [
   }
 ]
 
-export const blockCompanyNameRegExpTemplateList = [
+export const blockCompanyKeywordTemplateList = [
   {
     name: '不限公司（不按照公司名称来标注不合适）',
     value: ''
   },
   {
     name: '外包、劳务派遣企业',
-    value: `青钱|软通动力|南天|睿服|中电金信|佰钧成|云链|博彦|汉克时代|柯莱特|拓保|亿达信息|纬创|微创|微澜|诚迈科技|法本|兆尹|诚迈|联合永道|新致软件|宇信科技|华为|德科|FESCO|科锐|科之锐`
+    value: `青钱,软通动力,南天,睿服,中电金信,佰钧成,云链,博彦,汉克时代,柯莱特,拓保,亿达信息,纬创,微创,微澜,诚迈科技,法本,兆尹,诚迈,联合永道,新致软件,宇信科技,华为,德科,FESCO,科锐,科之锐`
   },
   {
     name: '京东及相关公司',
-    value: '京东|沃东天骏|达达|达冠|京邦达'
+    value: '京东,沃东天骏,达达,达冠,京邦达'
+  }
+]
+
+export const blockJobKeywordTemplateList = [
+  {
+    name: '不屏蔽（不按照职位关键词来标注不合适）',
+    value: ''
+  },
+  {
+    name: '外包 / 驻场 / 派遣',
+    value: '外包,驻场,派遣,外派,人力外包,岗外,项目制'
+  },
+  {
+    name: '销售 / 电销 / 客服',
+    value: '销售,电销,电话销售,客服,地推,招商,追读'
+  },
+  {
+    name: '实习 / 兼职 / 日结',
+    value: '实习,兼职,日结,周末班,暗期,小时工'
+  },
+  {
+    name: '培训费 / 付费上岗（防骗）',
+    value: '培训费,付费,学费,先交,押金,带资'
   }
 ]
 
@@ -217,12 +296,21 @@ export function getHandlerForExpectJobFilterTemplateClicked({ gtagRenderer, form
   }
 }
 
-export function getHandlerForBlockCompanyNameRegExpTemplateClicked({ gtagRenderer, formContent }) {
-  return function handleBlockCompanyNameRegExpTemplateClicked(item) {
-    gtagRenderer('bcn_reg_exp_tpl_clicked', {
+export function getHandlerForBlockCompanyKeywordTemplateClicked({ gtagRenderer, formContent }) {
+  return function handleBlockCompanyKeywordTemplateClicked(item) {
+    gtagRenderer('bck_tpl_clicked', {
       name: item.name
     })
-    formContent.value.blockCompanyNameRegExpStr = item.value
+    formContent.value.blockCompanyKeywordText = item.value
+  }
+}
+
+export function getHandlerForBlockJobKeywordTemplateClicked({ gtagRenderer, formContent }) {
+  return function handleBlockJobKeywordTemplateClicked(item) {
+    gtagRenderer('bjk_tpl_clicked', {
+      name: item.name
+    })
+    formContent.value.blockJobKeywordText = item.value
   }
 }
 
@@ -274,9 +362,30 @@ export function getHandlerForExpectSalaryCalculateWayChanged({ gtagRenderer, for
 }
 
 export const normalizeCommaSplittedStr = (str) => {
-  return str
+  return (str ?? '')
     .split(/,|，/)
     .map((it) => it.trim())
     .filter(Boolean)
     .join(',')
+}
+
+/**
+ * 表单里的关键词文本框字段（*Text）-> 配置文件里的关键词数组字段（*List）。
+ * 返回新对象，不修改入参。
+ */
+export function serializeBlockKeywordFields(formValue) {
+  const {
+    blockCompanyKeywordText,
+    blockCompanyKeywordExcludeText,
+    blockJobKeywordText,
+    blockJobKeywordExcludeText,
+    ...rest
+  } = formValue
+  return {
+    ...rest,
+    blockCompanyKeywordList: normalizeKeywordList(blockCompanyKeywordText),
+    blockCompanyKeywordExcludeList: normalizeKeywordList(blockCompanyKeywordExcludeText),
+    blockJobKeywordList: normalizeKeywordList(blockJobKeywordText),
+    blockJobKeywordExcludeList: normalizeKeywordList(blockJobKeywordExcludeText)
+  }
 }

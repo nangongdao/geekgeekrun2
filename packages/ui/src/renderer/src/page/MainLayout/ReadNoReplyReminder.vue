@@ -38,18 +38,18 @@
         <el-form-item>
           <div>
             <el-checkbox
-              v-if="!blockCompanyNameRegExpStrForRender?.trim()"
+              v-if="!blockCompanyKeywordTextForRender?.trim()"
               :model-value="false"
               disabled
             >
-              发送提醒消息前，先按照“自动开聊-不期望投递公司正则”校验正在与BOSS沟通的岗位是否归属于不期望投递的公司，如果是，则不提醒
+              发送提醒消息前，先按照“自动开聊-不期望投递公司关键词”校验正在与BOSS沟通的岗位是否归属于不期望投递的公司，如果是，则不提醒
             </el-checkbox>
             <template v-else>
               <el-checkbox v-model="formContent.autoReminder.onlyRemindBossWithoutBlockCompanyName">
-                发送提醒消息前，先按照“自动开聊-不期望投递公司正则”校验正在与BOSS沟通的岗位是否归属于不期望投递的公司，如果是，则不提醒
+                发送提醒消息前，先按照“自动开聊-不期望投递公司关键词”校验正在与BOSS沟通的岗位是否归属于不期望投递的公司，如果是，则不提醒
               </el-checkbox>
               <div ml1.5em color-gray>
-                <div>当前不期望投递公司正则：{{ blockCompanyNameRegExpStrForRender?.trim() }}</div>
+                <div>当前不期望投递公司关键词：{{ blockCompanyKeywordTextForRender?.trim() }}</div>
               </div>
             </template>
           </div>
@@ -367,6 +367,7 @@ import { QuestionFilled } from '@element-plus/icons-vue'
 import RunningOverlay from '@renderer/features/RunningOverlay/index.vue'
 import { DEFAULT_CONSTANT_OPEN_CONTENT_SEGS } from '../../../../common/constant'
 import { useTaskManagerStore } from '@renderer/store'
+import { readBlockCompanyKeywordText } from './GeekAutoStartChatWithBoss/common'
 const gtagRenderer = (name, params?: object) => {
   return baseGtagRenderer(name, {
     scene: 'rnrr-config',
@@ -426,14 +427,19 @@ electron.ipcRenderer.invoke('fetch-config-file-content').then((res) => {
 })
 
 const expectJobTypeRegExpStr = ref('')
-const blockCompanyNameRegExpStr = ref('')
+const blockCompanyKeywordText = ref('')
 const fieldsForUseCommonConfig = ref({})
 async function fetchAutoStartChatConfig() {
   await electron.ipcRenderer.invoke('fetch-config-file-content').then((res) => {
     expectJobTypeRegExpStr.value = res.config['boss.json']?.expectJobTypeRegExpStr
-    blockCompanyNameRegExpStr.value = res.config['boss.json']?.blockCompanyNameRegExpStr
+    blockCompanyKeywordText.value = readBlockCompanyKeywordText(res.config['boss.json'])
     fieldsForUseCommonConfig.value = res.config['boss.json']?.fieldsForUseCommonConfig ?? {}
-    commonJobConditionConfig.value = res.config['common-job-condition-config.json']
+    commonJobConditionConfig.value = {
+      ...(res.config['common-job-condition-config.json'] ?? {}),
+      blockCompanyKeywordText: readBlockCompanyKeywordText(
+        res.config['common-job-condition-config.json']
+      )
+    }
   })
 }
 fetchAutoStartChatConfig()
@@ -447,7 +453,8 @@ const unListenCommonJobConditionConfig = electron.ipcRenderer.on(
   (_, { config }) => {
     commonJobConditionConfig.value = {
       ...config,
-      expectCompanies: config?.expectCompanies?.map((it) => it.trim())?.join(',') ?? ''
+      expectCompanies: config?.expectCompanies?.map((it) => it.trim())?.join(',') ?? '',
+      blockCompanyKeywordText: readBlockCompanyKeywordText(config)
     }
   }
 )
@@ -460,10 +467,10 @@ const expectJobTypeRegExpStrForRender = computed(() => {
     ? expectJobTypeRegExpStr.value
     : commonJobConditionConfig.value.expectJobTypeRegExpStr
 })
-const blockCompanyNameRegExpStrForRender = computed(() => {
+const blockCompanyKeywordTextForRender = computed(() => {
   return !fieldsForUseCommonConfig.value.blockCompanyNameRegExpStr
-    ? blockCompanyNameRegExpStr.value
-    : commonJobConditionConfig.value.blockCompanyNameRegExpStr
+    ? blockCompanyKeywordText.value
+    : commonJobConditionConfig.value.blockCompanyKeywordText
 })
 
 const resumeContent = ref(null)

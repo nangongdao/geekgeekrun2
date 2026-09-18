@@ -58,6 +58,7 @@ import {
 import { getLastUsedAndAvailableBrowser } from '../../DOWNLOAD_DEPENDENCIES/utils/browser-history'
 import { waitForCommonJobConditionDone } from '../../../features/common-job-condition'
 import { ensureConfigFileExist } from '@geekgeekrun/geek-auto-start-chat-with-boss/runtime-file-utils.mjs'
+import { normalizeKeywordList } from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
 
 export default function initIpc() {
   ipcMain.handle('save-config-file-from-ui', async (ev, payload) => {
@@ -166,11 +167,33 @@ export default function initIpc() {
     if (hasOwn(payload, 'sageTimePauseMinute')) {
       bossConfig.sageTimePauseMinute = payload.sageTimePauseMinute
     }
-    if (hasOwn(payload, 'blockCompanyNameRegExpStr')) {
+    // 不期望投递公司：关键词列表。保存关键词时同时清掉旧版正则，避免两套配置同时生效让人困惑
+    if (hasOwn(payload, 'blockCompanyKeywordList')) {
+      bossConfig.blockCompanyKeywordList = normalizeKeywordList(payload.blockCompanyKeywordList)
+      bossConfig.blockCompanyNameRegExpStr = ''
+    } else if (hasOwn(payload, 'blockCompanyNameRegExpStr')) {
       bossConfig.blockCompanyNameRegExpStr = payload.blockCompanyNameRegExpStr
+    }
+    if (hasOwn(payload, 'blockCompanyKeywordExcludeList')) {
+      bossConfig.blockCompanyKeywordExcludeList = normalizeKeywordList(
+        payload.blockCompanyKeywordExcludeList
+      )
     }
     if (hasOwn(payload, 'blockCompanyNameRegMatchStrategy')) {
       bossConfig.blockCompanyNameRegMatchStrategy = payload.blockCompanyNameRegMatchStrategy
+    }
+    // 不期望投递职位：关键词列表
+    if (hasOwn(payload, 'blockJobKeywordList')) {
+      bossConfig.blockJobKeywordList = normalizeKeywordList(payload.blockJobKeywordList)
+    }
+    if (hasOwn(payload, 'blockJobKeywordExcludeList')) {
+      bossConfig.blockJobKeywordExcludeList = normalizeKeywordList(payload.blockJobKeywordExcludeList)
+    }
+    if (hasOwn(payload, 'blockJobKeywordMatchFields')) {
+      bossConfig.blockJobKeywordMatchFields = payload.blockJobKeywordMatchFields
+    }
+    if (hasOwn(payload, 'blockJobKeywordMatchStrategy')) {
+      bossConfig.blockJobKeywordMatchStrategy = payload.blockJobKeywordMatchStrategy
     }
     if (hasOwn(payload, 'fieldsForUseCommonConfig')) {
       bossConfig.fieldsForUseCommonConfig = payload.fieldsForUseCommonConfig

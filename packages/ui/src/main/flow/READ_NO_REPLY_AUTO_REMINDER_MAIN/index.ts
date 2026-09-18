@@ -10,6 +10,10 @@ import {
   getPublicDbFilePath,
   readConfigFile
 } from '@geekgeekrun/geek-auto-start-chat-with-boss/runtime-file-utils.mjs'
+import {
+  createCompanyBlockMatcher,
+  resolveBlockFilterConfig
+} from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
 import { ChatMessageRecord } from '@geekgeekrun/sqlite-plugin/dist/entity/ChatMessageRecord'
 import {
   saveChatMessageRecord,
@@ -69,25 +73,15 @@ const onlyRemindBossWithExpectJobType =
   readConfigFile('boss.json').autoReminder?.onlyRemindBossWithExpectJobType ??
   !!expectJobTypeRegExpStr
 
-const blockCompanyNameRegExpStr =
-  (!fieldsForUseCommonConfig.blockCompanyNameRegExpStr
-    ? readConfigFile('boss.json')
-    : commonJobConditionConfig
-  )?.blockCompanyNameRegExpStr ?? ''
-
-const blockCompanyNameRegExp = (() => {
-  if (!blockCompanyNameRegExpStr?.trim()) {
-    return null
-  }
-  try {
-    return new RegExp(blockCompanyNameRegExpStr, 'im')
-  } catch {
-    return null
-  }
-})()
+const companyBlockMatcher = createCompanyBlockMatcher(
+  resolveBlockFilterConfig({
+    bossConfig: readConfigFile('boss.json'),
+    commonConfig: commonJobConditionConfig
+  }).company
+)
 const onlyRemindBossWithoutBlockCompanyName =
   readConfigFile('boss.json').autoReminder?.onlyRemindBossWithoutBlockCompanyName ??
-  !!blockCompanyNameRegExp
+  companyBlockMatcher.isEnabled
 
 const openContentSource =
   readConfigFile('boss.json').autoReminder?.openContentSource ??
@@ -501,8 +495,8 @@ const mainLoop = async () => {
     const toCheckItemAtIndex = friendListData.findIndex((it, index) => {
       return (
         index >= cursorToContinueFind &&
-        (onlyRemindBossWithoutBlockCompanyName && blockCompanyNameRegExp
-          ? !blockCompanyNameRegExp.test(it.brandName)
+        (onlyRemindBossWithoutBlockCompanyName && companyBlockMatcher.isEnabled
+          ? !companyBlockMatcher.test(it.brandName).matched
           : true) &&
         (rechatLimitDay && it.updateTime
           ? +new Date() - it.updateTime < rechatLimitDay * 24 * 60 * 60 * 1000

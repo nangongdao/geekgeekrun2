@@ -18,8 +18,8 @@ import {
   checkAnyCombineBossRecommendFilterHasCondition,
   formatStaticCombineFilters,
 } from './combineCalculator.mjs'
-import { default as jobFilterConditions } from './internal-config/job-filter-conditions-20241002.json'
-import { default as rawIndustryFilterExemption } from './internal-config/job-filter-industry-filter-exemption-20241002.json'
+import { default as jobFilterConditions } from './internal-config/job-filter-conditions-20241002.json' with { type: 'json' }
+import { default as rawIndustryFilterExemption } from './internal-config/job-filter-industry-filter-exemption-20241002.json' with { type: 'json' }
 import { ChatStartupFrom } from '@geekgeekrun/sqlite-plugin/dist/entity/ChatStartupLog'
 import {
   MarkAsNotSuitReason,
@@ -38,6 +38,11 @@ import {
 } from './constant.mjs'
 import { parseSalary } from "@geekgeekrun/sqlite-plugin/dist/utils/parser"
 import { waitForSageTimeOrJustContinue } from './sage-time.mjs'
+import {
+  createCompanyBlockMatcher,
+  createJobBlockMatcher,
+  resolveBlockFilterConfig
+} from './job-filter.mjs'
 import cityGroupData from './cityGroup.mjs'
 import { hasIntersection } from '@geekgeekrun/utils/number.mjs';
 const flattedCityList = []
@@ -282,24 +287,20 @@ const recommendJobPageUrl = `https://www.zhipin.com/web/geek/jobs`
 
 const expectCompanySet = new Set(targetCompanyList)
 const enableCompanyAllowList = Boolean(expectCompanySet.size)
-const blockCompanyNameRegExpStr = (
-  !fieldsForUseCommonConfig.blockCompanyNameRegExpStr ?
-    readConfigFile('boss.json').blockCompanyNameRegExpStr
-    :
-    commonJobConditionConfig.blockCompanyNameRegExpStr
-) ?? ''
-const blockCompanyNameRegExp = (() => {
-  if (!blockCompanyNameRegExpStr?.trim()) {
-    return null
-  }
-  try {
-    return new RegExp(blockCompanyNameRegExpStr, 'im')
-  }
-  catch {
-    return null
-  }
-})()
-const blockCompanyNameRegMatchStrategy = readConfigFile('boss.json').blockCompanyNameRegMatchStrategy ?? MarkAsNotSuitOp.NO_OP
+
+//#region 关键词屏蔽：不期望投递的公司 / 职位
+// 解析“公共职位筛选条件 vs 本次运行配置”并建立匹配器，匹配规则见 ./job-filter.mjs
+const blockFilterConfig = resolveBlockFilterConfig({
+  bossConfig: readConfigFile('boss.json'),
+  commonConfig: commonJobConditionConfig
+})
+const companyBlockMatcher = createCompanyBlockMatcher(blockFilterConfig.company)
+const blockCompanyNameRegMatchStrategy = blockFilterConfig.company.strategy ?? MarkAsNotSuitOp.NO_OP
+const jobBlockMatcher = createJobBlockMatcher(blockFilterConfig.job)
+const blockJobKeywordMatchStrategy = blockFilterConfig.job.strategy ?? MarkAsNotSuitOp.NO_OP
+console.log(`[屏蔽公司] ${companyBlockMatcher.describe()}`)
+console.log(`[屏蔽职位] ${jobBlockMatcher.describe()}`)
+//#endregion
 
 /**
  * @type { import('puppeteer').Browser }
@@ -401,6 +402,7 @@ async function markJobAsNotSuitInRecommendPage (reasonCode) {
           break
         }
         case MarkAsNotSuitReason.JOB_NOT_SUIT:
+        case MarkAsNotSuitReason.JOB_KEYWORD_NOT_SUIT:
         default: {
           const opProxy = (await chooseReasonDialogProxy.$(`.zp-type-item[title$="职位"]`))
             ?? (await chooseReasonDialogProxy.$(`.zp-type-item[title="面试过/入职过"]`))
@@ -672,6 +674,9 @@ async function setFilterCondition (selectedFilters) {
 }
 
 async function toRecommendPage (hooks) {
+  // 复用页面重新进入流程时，清掉上一轮流程遗留的监听器，避免跨轮次累积
+  page.removeAllListeners('request')
+  page.removeAllListeners('response')
   let userInfoPromise = page.waitForResponse((response) => {
       if (response.url().startsWith('https://www.zhipin.com/wapi/zpuser/wap/getUserInfo.json')) {
         return true
@@ -697,6 +702,8 @@ async function toRecommendPage (hooks) {
   }, undefined, { recommendJobPageUrl })
 
   hooks.pageLoaded?.call()
+  // 页面能正常加载，说明浏览器状态健康，重置“复用浏览器软恢复”的连续失败计数
+  consecutiveSoftRecoveryCount = 0
 
   let userInfoResponse = await userInfoPromise
   await hooks.userInfoResponse?.promise({ userInfoResponse, browser })
@@ -955,25 +962,67 @@ async function toRecommendPage (hooks) {
                     blockJobNotSuit.add(it.encryptJobId)
                   }
                 })
-                if (
-                  (
-                    expectCityNotMatchStrategy === MarkAsNotSuitOp.NO_OP && 
-                    Array.isArray(expectCityList) &&
-                    expectCityList.length
-                  ) ||
-                  (
-                    expectWorkExpNotMatchStrategy === MarkAsNotSuitOp.NO_OP && 
-                    Array.isArray(expectWorkExpList) &&
-                    expectWorkExpList.length
-                  ) ||
-                  (
-                    strategyScopeOptionWhenMarkSalaryNotMatch === MarkAsNotSuitOp.NO_OP &&
-                    isSalaryFilterEnabled
-                  )
-                ) {
-                  console.log(`add job city not suit into blockJobNotSuit set`)
+                // 职位名称在列表阶段就能拿到：如果命中屏蔽关键词且策略是“仅本次运行跳过”，
+                // 就不必点开详情，直接跳过，省时也减少无效操作
+                if (jobBlockMatcher.isEnabled && blockJobKeywordMatchStrategy === MarkAsNotSuitOp.NO_OP) {
                   for (const it of jobListData) {
-                    if (!expectCityList.includes(it.cityName)) {
+                    if (blockJobNotSuit.has(it.encryptJobId)) {
+                      continue
+                    }
+                    const { matched, keyword, excludedKeyword } = jobBlockMatcher.testListItem(it)
+                    if (matched) {
+                      console.log(`[屏蔽职位] 列表预筛跳过：《${it.jobName}》（${it.brandName}）命中关键词“${keyword}”`)
+                      blockJobNotSuit.add(it.encryptJobId)
+                    } else if (excludedKeyword) {
+                      console.log(`[屏蔽职位] 列表预筛放行：《${it.jobName}》（${it.brandName}）命中关键词但被排除词“${excludedKeyword}”放行`)
+                    }
+                  }
+                }
+                // 公司名称同理
+                if (companyBlockMatcher.isEnabled && blockCompanyNameRegMatchStrategy === MarkAsNotSuitOp.NO_OP) {
+                  for (const it of jobListData) {
+                    if (blockJobNotSuit.has(it.encryptJobId)) {
+                      continue
+                    }
+                    const { matched, keyword } = companyBlockMatcher.test(it.brandName)
+                    if (matched) {
+                      console.log(`[屏蔽公司] 列表预筛跳过：《${it.jobName}》（${it.brandName}）命中“${keyword}”`)
+                      blockJobNotSuit.add(it.encryptJobId)
+                    }
+                  }
+                }
+                // 列表阶段就能拿到 cityName / jobExperience / salaryDesc，
+                // 当某条筛选的策略是“仅本次运行跳过”（NO_OP）时，不必点开详情，直接从列表跳过。
+                //
+                // 注意：这三个条件必须各自独立判断。此前它们共用一个 if 和同一个 for 循环，
+                // 而循环体内只判断 expectCityList，于是“只设了期望工作年限、没设期望城市”时
+                // 会把当前页所有职位都加进 blockJobNotSuit，导致整页无法开聊。
+                const shouldSkipByCity =
+                  expectCityNotMatchStrategy === MarkAsNotSuitOp.NO_OP &&
+                  Array.isArray(expectCityList) &&
+                  expectCityList.length > 0
+                const shouldSkipByWorkExp =
+                  expectWorkExpNotMatchStrategy === MarkAsNotSuitOp.NO_OP &&
+                  Array.isArray(expectWorkExpList) &&
+                  expectWorkExpList.length > 0
+                const shouldSkipBySalary =
+                  expectSalaryNotMatchStrategy === MarkAsNotSuitOp.NO_OP &&
+                  isSalaryFilterEnabled
+                if (shouldSkipByCity || shouldSkipByWorkExp || shouldSkipBySalary) {
+                  console.log(`add not-suit job into blockJobNotSuit set`, {
+                    shouldSkipByCity,
+                    shouldSkipByWorkExp,
+                    shouldSkipBySalary
+                  })
+                  for (const it of jobListData) {
+                    if (blockJobNotSuit.has(it.encryptJobId)) {
+                      continue
+                    }
+                    const isNotSuit =
+                      (shouldSkipByCity && !expectCityList.includes(it.cityName)) ||
+                      (shouldSkipByWorkExp && !expectWorkExpList.includes(it.jobExperience)) ||
+                      (shouldSkipBySalary && !checkIfSalarySuit(it.salaryDesc))
+                    if (isNotSuit) {
                       blockJobNotSuit.add(it.encryptJobId)
                     }
                   }
@@ -1055,12 +1104,20 @@ async function toRecommendPage (hooks) {
                         ) ? !checkIfSalarySuit(it.salaryDesc) : false
                       ) || (
                         // enter job detail to mark as not suit for company name filter
-                        !!blockCompanyNameRegExp &&
-                        blockCompanyNameRegExp.test(it.brandName?.toLowerCase?.() ?? '') &&
-                          [
-                            MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS,
-                            MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL
-                          ].includes(blockCompanyNameRegMatchStrategy)
+                        companyBlockMatcher.isEnabled &&
+                        [
+                          MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS,
+                          MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL
+                        ].includes(blockCompanyNameRegMatchStrategy) &&
+                        companyBlockMatcher.test(it.brandName).matched
+                      ) || (
+                        // enter job detail to mark as not suit for job keyword filter
+                        jobBlockMatcher.isEnabled &&
+                        [
+                          MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS,
+                          MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL
+                        ].includes(blockJobKeywordMatchStrategy) &&
+                        jobBlockMatcher.testListItem(it).matched
                       )
                     )
                 })
@@ -1153,264 +1210,108 @@ async function toRecommendPage (hooks) {
 
                   //#region collect not suit reasons
                   const notSuitReasonIdToStrategyMap = {}
-                  const notSuitConditionHandleMap = {
-                    async companyName() {
-                      blockJobNotSuit.add(targetJobData.jobInfo.encryptId)
-                      if (blockCompanyNameRegMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL && !await page.$('.job-detail-box .job-detail-operate .not-suitable')) {
+                  const notSuitableButtonSelector = '.job-detail-box .job-detail-operate .not-suitable'
+                  /**
+                   * 生成某一种“不合适原因”的处理器。
+                   * 处理器职责：把职位/BOSS 记入本次运行的跳过集合；再按策略在 BOSS 直聘上标记、或仅写入本地数据库。
+                   * 当页面上没有“不合适”按钮时（例如搜索结果页），会回落到本地数据库记录。
+                   */
+                  const createNotSuitHandler = ({ reason, strategy, addToBlockSet, getExtInfo = () => null }) => {
+                    const currentJobSource = JobSource[computedSourceList[currentSourceIndex]?.type]
+                    const recordMark = (markOp, extInfo) => hooks.jobMarkedAsNotSuit.promise(
+                      targetJobData,
+                      {
+                        markFrom: ChatStartupFrom.AutoFromRecommendList,
+                        markReason: reason,
+                        extInfo,
+                        markOp,
+                        jobSource: currentJobSource
+                      }
+                    )
+                    return async () => {
+                      addToBlockSet()
+                      const hasNotSuitableButton = !!(await page.$(notSuitableButtonSelector))
+                      if (strategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL || !hasNotSuitableButton) {
                         try {
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.COMPANY_NAME_NOT_SUIT,
-                              extInfo: null,
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
+                          await recordMark(MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL, getExtInfo())
                         } catch {
                         }
                       }
-                      else if (blockCompanyNameRegMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS) {
+                      else if (strategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS) {
                         try {
                           await waitForSageTimeOrJustContinue({
                             tag: 'beforeJobNotSuitMarked',
                             hooks
                           })
-                          const { chosenReasonInUi } = await markJobAsNotSuitInRecommendPage(MarkAsNotSuitReason.COMPANY_NAME_NOT_SUIT)
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.COMPANY_NAME_NOT_SUIT,
-                              extInfo: {
-                                chosenReasonInUi
-                              },
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch(err) {
-                          console.log(`mark boss inactive failed`, err)
-                        }
-                      }
-                    },
-                    async active() {
-                      blockBossNotActive.add(targetJobData.jobInfo.encryptUserId)
-                      if (jobNotActiveStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL || !await page.$('.job-detail-box .job-detail-operate .not-suitable')) {
-                        try {
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.BOSS_INACTIVE,
-                              extInfo: null,
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch {
-                        }
-                      }
-                      else if (jobNotActiveStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS) {
-                        try {
-                          await waitForSageTimeOrJustContinue({
-                            tag: 'beforeJobNotSuitMarked',
-                            hooks
+                          const { chosenReasonInUi } = await markJobAsNotSuitInRecommendPage(reason)
+                          await recordMark(MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS, {
+                            ...(getExtInfo() ?? {}),
+                            chosenReasonInUi
                           })
-                          const { chosenReasonInUi } = await markJobAsNotSuitInRecommendPage(MarkAsNotSuitReason.BOSS_INACTIVE)
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.BOSS_INACTIVE,
-                              extInfo: {
-                                bossActiveTimeDesc: targetJobData.bossInfo.activeTimeDesc,
-                                chosenReasonInUi
-                              },
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
                         } catch(err) {
-                          console.log(`mark boss inactive failed`, err)
-                        }
-                      }
-                    },
-                    async city() {
-                      blockJobNotSuit.add(targetJobData.jobInfo.encryptId)
-                      if (expectCityNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL || !await page.$('.job-detail-box .job-detail-operate .not-suitable')) {
-                        try {
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.JOB_CITY_NOT_SUIT,
-                              extInfo: null,
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch {
-                        }
-                      }
-                      else if (expectCityNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS) {
-                        try {
-                          await waitForSageTimeOrJustContinue({
-                            tag: 'beforeJobNotSuitMarked',
-                            hooks
-                          })
-                          const { chosenReasonInUi } = await markJobAsNotSuitInRecommendPage(MarkAsNotSuitReason.JOB_CITY_NOT_SUIT)
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.JOB_CITY_NOT_SUIT,
-                              extInfo: {
-                                chosenReasonInUi
-                              },
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch(err) {
-                          console.log(`mark job city not suit failed`, err)
-                        }
-                      }
-                    },
-                    async workExp() {
-                      blockJobNotSuit.add(targetJobData.jobInfo.encryptId)
-                      if (expectWorkExpNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL || !await page.$('.job-detail-box .job-detail-operate .not-suitable')) {
-                        try {
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.JOB_WORK_EXP_NOT_SUIT,
-                              extInfo: null,
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch {
-                        }
-                      }
-                      else if (expectWorkExpNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS) {
-                        try {
-                          await waitForSageTimeOrJustContinue({
-                            tag: 'beforeJobNotSuitMarked',
-                            hooks
-                          })
-                          const { chosenReasonInUi } = await markJobAsNotSuitInRecommendPage(MarkAsNotSuitReason.JOB_WORK_EXP_NOT_SUIT)
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.JOB_WORK_EXP_NOT_SUIT,
-                              extInfo: {
-                                chosenReasonInUi
-                              },
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch(err) {
-                          console.log(`mark job work exp not suit failed`, err)
-                        }
-                      }
-                    },
-                    async jobDetail() {
-                      blockJobNotSuit.add(targetJobData.jobInfo.encryptId)
-                      if (jobNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL || !await page.$('.job-detail-box .job-detail-operate .not-suitable')) {
-                        try {
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.JOB_NOT_SUIT,
-                              extInfo: null,
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch {
-                        }
-                      }
-                      else if (jobNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS) {
-                        try {
-                          await waitForSageTimeOrJustContinue({
-                            tag: 'beforeJobNotSuitMarked',
-                            hooks
-                          })
-                          const { chosenReasonInUi } = await markJobAsNotSuitInRecommendPage(MarkAsNotSuitReason.JOB_NOT_SUIT)
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.JOB_NOT_SUIT,
-                              extInfo: {
-                                bossActiveTimeDesc: targetJobData.bossInfo.activeTimeDesc,
-                                chosenReasonInUi
-                              },
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch(err) {
-                          console.log(`mark job detail not suit failed`, err)
-                        }
-                      }
-                    },
-                    async salary() {
-                      blockJobNotSuit.add(targetJobData.jobInfo.encryptId)
-                      if (expectSalaryNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL || !await page.$('.job-detail-box .job-detail-operate .not-suitable')) {
-                        try {
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.JOB_SALARY_NOT_SUIT,
-                              extInfo: {
-                                salaryDesc: selectedJobData.salaryDesc,
-                              },
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch {
-                        }
-                      }
-                      else if (expectSalaryNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS) {
-                        try {
-                          await waitForSageTimeOrJustContinue({
-                            tag: 'beforeJobNotSuitMarked',
-                            hooks
-                          })
-                          const { chosenReasonInUi } = await markJobAsNotSuitInRecommendPage(MarkAsNotSuitReason.JOB_SALARY_NOT_SUIT)
-                          await hooks.jobMarkedAsNotSuit.promise(
-                            targetJobData,
-                            {
-                              markFrom: ChatStartupFrom.AutoFromRecommendList,
-                              markReason: MarkAsNotSuitReason.JOB_SALARY_NOT_SUIT,
-                              extInfo: {
-                                salaryDesc: selectedJobData.salaryDesc,
-                                chosenReasonInUi
-                              },
-                              markOp: MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS,
-                              jobSource: JobSource[computedSourceList[currentSourceIndex]?.type]
-                            }
-                          )
-                        } catch(err) {
-                          console.log(`mark job salary not suit failed`, err)
+                          console.log(`mark job as not suit failed (reason: ${MarkAsNotSuitReason[reason] ?? reason})`, err)
                         }
                       }
                     }
                   }
+                  const blockCurrentJob = () => blockJobNotSuit.add(targetJobData.jobInfo.encryptId)
+                  const blockCurrentBoss = () => blockBossNotActive.add(targetJobData.jobInfo.encryptUserId)
+                  const companyBlockResult = companyBlockMatcher.test(selectedJobData.brandName)
+                  const jobBlockResult = jobBlockMatcher.test(targetJobData.jobInfo)
+                  const notSuitConditionHandleMap = {
+                    companyName: createNotSuitHandler({
+                      reason: MarkAsNotSuitReason.COMPANY_NAME_NOT_SUIT,
+                      strategy: blockCompanyNameRegMatchStrategy,
+                      addToBlockSet: blockCurrentJob,
+                      getExtInfo: () => ({ matchedKeyword: companyBlockResult.keyword })
+                    }),
+                    jobKeyword: createNotSuitHandler({
+                      reason: MarkAsNotSuitReason.JOB_KEYWORD_NOT_SUIT,
+                      strategy: blockJobKeywordMatchStrategy,
+                      addToBlockSet: blockCurrentJob,
+                      getExtInfo: () => ({ matchedKeyword: jobBlockResult.keyword, matchedField: jobBlockResult.field })
+                    }),
+                    active: createNotSuitHandler({
+                      reason: MarkAsNotSuitReason.BOSS_INACTIVE,
+                      strategy: jobNotActiveStrategy,
+                      addToBlockSet: blockCurrentBoss,
+                      getExtInfo: () => ({ bossActiveTimeDesc: targetJobData.bossInfo.activeTimeDesc })
+                    }),
+                    city: createNotSuitHandler({
+                      reason: MarkAsNotSuitReason.JOB_CITY_NOT_SUIT,
+                      strategy: expectCityNotMatchStrategy,
+                      addToBlockSet: blockCurrentJob
+                    }),
+                    workExp: createNotSuitHandler({
+                      reason: MarkAsNotSuitReason.JOB_WORK_EXP_NOT_SUIT,
+                      strategy: expectWorkExpNotMatchStrategy,
+                      addToBlockSet: blockCurrentJob
+                    }),
+                    jobDetail: createNotSuitHandler({
+                      reason: MarkAsNotSuitReason.JOB_NOT_SUIT,
+                      strategy: jobNotMatchStrategy,
+                      addToBlockSet: blockCurrentJob,
+                      getExtInfo: () => ({ bossActiveTimeDesc: targetJobData.bossInfo.activeTimeDesc })
+                    }),
+                    salary: createNotSuitHandler({
+                      reason: MarkAsNotSuitReason.JOB_SALARY_NOT_SUIT,
+                      strategy: expectSalaryNotMatchStrategy,
+                      addToBlockSet: blockCurrentJob,
+                      getExtInfo: () => ({ salaryDesc: selectedJobData.salaryDesc })
+                    })
+                  }
 
-                  if (
-                    !!blockCompanyNameRegExp && blockCompanyNameRegExp.test(selectedJobData.brandName ?? '')
-                  ) {
+                  if (companyBlockResult.matched) {
+                    console.log(`[屏蔽公司] 《${targetJobData.jobInfo.jobName}》（${selectedJobData.brandName}）命中“${companyBlockResult.keyword}”`)
                     notSuitReasonIdToStrategyMap.companyName = blockCompanyNameRegMatchStrategy
+                  } else if (companyBlockResult.excludedKeyword) {
+                    console.log(`[屏蔽公司] 《${targetJobData.jobInfo.jobName}》（${selectedJobData.brandName}）命中“${companyBlockResult.keyword ?? ''}”但被排除词“${companyBlockResult.excludedKeyword}”放行`)
+                  }
+                  if (jobBlockResult.matched) {
+                    console.log(`[屏蔽职位] 《${targetJobData.jobInfo.jobName}》（${selectedJobData.brandName}）${jobBlockResult.fieldLabel}命中关键词“${jobBlockResult.keyword}”`)
+                    notSuitReasonIdToStrategyMap.jobKeyword = blockJobKeywordMatchStrategy
+                  } else if (jobBlockResult.excludedKeyword) {
+                    console.log(`[屏蔽职位] 《${targetJobData.jobInfo.jobName}》（${selectedJobData.brandName}）命中关键词但被排除词“${jobBlockResult.excludedKeyword}”放行`)
                   }
                   //#region
                   // null
@@ -1694,65 +1595,205 @@ async function toRecommendPage (hooks) {
   }
 }
 
+//#region 浏览器生命周期：能复用就复用，只在浏览器真的挂了时才重启
+
+/**
+ * 浏览器还活着（进程在、CDP 连接在）吗？
+ */
+export function isBrowserAlive () {
+  return !!browser && browser.connected !== false
+}
+
+/**
+ * 这些错误说明浏览器 / CDP 会话本身已经不可用，必须重启；
+ * 其他错误（选择器等待超时、页面内容变化、业务上的开聊失败……）只需要重新进入流程即可。
+ */
+const BROWSER_LEVEL_ERROR_PATTERNS = [
+  /Browser has disconnected/i,
+  /Target closed/i,
+  /Session closed/i,
+  /Protocol error/i,
+  /Connection closed/i,
+  /WebSocket is not open/i,
+  /browser has been closed/i,
+  /Failed to launch the browser process/i,
+  /Could not find Chrome/i,
+  /no executable was found/i,
+]
+export function isBrowserLevelError (err) {
+  const message = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err ?? '')
+  return BROWSER_LEVEL_ERROR_PATTERNS.some(re => re.test(message))
+}
+
+// 连续“软恢复”（不重启浏览器）依旧失败到达这个次数后，退而求其次重启浏览器
+// 防止页面卡在某个奇怪状态时无限原地打转
+export const MAX_CONSECUTIVE_SOFT_RECOVERY = 3
+let consecutiveSoftRecoveryCount = 0
+
+export const BROWSER_RECOVERY_ACTION = {
+  REUSE: 'reuse-browser',
+  RESTART: 'restart-browser'
+}
+
+/**
+ * 纯函数形式的重启决策：只依赖入参，不读模块状态。
+ * 抽出来是为了让“连续软恢复失败后升格重启”这段边界逻辑能被测试直接覆盖。
+ *
+ * @param {object} args
+ * @param {unknown} args.error 主流程抛出的错误
+ * @param {boolean} args.browserAlive 浏览器 / CDP 会话是否仍然可用
+ * @param {number} [args.consecutiveSoftRecoveryFailureCount] 已经连续软恢复失败的次数
+ * @returns {{ action: string, nextConsecutiveSoftRecoveryFailureCount: number, message: string }}
+ */
+export function resolveRecoveryAction ({
+  error,
+  browserAlive,
+  consecutiveSoftRecoveryFailureCount = 0
+}) {
+  if (!browserAlive || isBrowserLevelError(error)) {
+    return {
+      action: BROWSER_RECOVERY_ACTION.RESTART,
+      nextConsecutiveSoftRecoveryFailureCount: 0,
+      message: ''
+    }
+  }
+  const nextCount = consecutiveSoftRecoveryFailureCount + 1
+  if (nextCount >= MAX_CONSECUTIVE_SOFT_RECOVERY) {
+    return {
+      action: BROWSER_RECOVERY_ACTION.RESTART,
+      nextConsecutiveSoftRecoveryFailureCount: 0,
+      message: `[Browser] 连续 ${nextCount} 次复用浏览器恢复失败，改为重启浏览器`
+    }
+  }
+  return {
+    action: BROWSER_RECOVERY_ACTION.REUSE,
+    nextConsecutiveSoftRecoveryFailureCount: nextCount,
+    message: ''
+  }
+}
+
+/**
+ * 主流程抛错后，由调用方（run-core / UI worker）调用，决定是“复用浏览器重进流程”还是“关掉浏览器重启”。
+ * @returns {'reuse-browser' | 'restart-browser'}
+ */
+export function decideRecoveryAction (err) {
+  const decision = resolveRecoveryAction({
+    error: err,
+    browserAlive: isBrowserAlive(),
+    consecutiveSoftRecoveryFailureCount: consecutiveSoftRecoveryCount
+  })
+  consecutiveSoftRecoveryCount = decision.nextConsecutiveSoftRecoveryFailureCount
+  if (decision.message) {
+    console.log(decision.message)
+  }
+  return decision.action
+}
+
+/**
+ * 得到一个可用的 browser：已连接则直接复用，否则新开一个。
+ * @returns {Promise<{ isFreshLaunch: boolean }>}
+ */
+async function ensureBrowser (hooks) {
+  if (isBrowserAlive()) {
+    return { isFreshLaunch: false }
+  }
+  browser = await puppeteer.launch({
+    headless: false,
+    ignoreHTTPSErrors: true,
+    defaultViewport: {
+      width: 1440,
+      height: 900 - 140,
+    }
+  })
+  const launchedBrowser = browser
+  launchedBrowser.once('disconnected', () => {
+    if (browser === launchedBrowser) {
+      console.log('[Browser] 浏览器已断开连接，下次进入流程时将重新启动')
+      browser = null
+      page = null
+    }
+  })
+  hooks.puppeteerLaunched?.call(browser)
+  return { isFreshLaunch: true }
+}
+
+/**
+ * 得到一个可用的 page：原页面还在则复用，被关掉了则重新打开一个。
+ */
+async function ensurePage (hooks) {
+  if (page && !page.isClosed()) {
+    return page
+  }
+  const openedPages = (await browser.pages()).filter(p => !p.isClosed())
+  page = openedPages[0] ?? await browser.newPage()
+  hooks.pageGotten?.call(page)
+  return page
+}
+
+async function restoreLoginSession (hooks) {
+  const bossCookies = readStorageFile('boss-cookies.json')
+  const bossLocalStorage = readStorageFile('boss-local-storage.json')
+  await hooks.cookieWillSet?.promise({ cookies: bossCookies, browser })
+  for(let i = 0; i < bossCookies.length; i++){
+    if (Object.hasOwn(bossCookies[i], 'sameSite')) {
+      bossCookies[i].sameSite = 'unspecified'
+    }
+    await page.setCookie(bossCookies[i]);
+  }
+  await setDomainLocalStorage(browser, localStoragePageUrl, bossLocalStorage)
+}
+
 export async function mainLoop (hooks) {
   if (!puppeteer) {
     await initPuppeteer()
   }
-  try {
-    browser = await puppeteer.launch({
-      headless: false,
-      ignoreHTTPSErrors: true,
-      defaultViewport: {
-        width: 1440,
-        height: 900 - 140,
-      }
-    })
-    hooks.puppeteerLaunched?.call(browser)
-    page = (await browser.pages())[0]
-    hooks.pageGotten?.call(page)
-    //set cookies
-    const bossCookies = readStorageFile('boss-cookies.json')
-    const bossLocalStorage = readStorageFile('boss-local-storage.json')
-    await hooks.cookieWillSet?.promise({ cookies: bossCookies, browser })
-    for(let i = 0; i < bossCookies.length; i++){
-      if (Object.hasOwn(bossCookies[i], 'sameSite')) {
-        bossCookies[i].sameSite = 'unspecified'
-      }
-      await page.setCookie(bossCookies[i]);
-    }
-    await setDomainLocalStorage(browser, localStoragePageUrl, bossLocalStorage)
-    await page.bringToFront()
-    // __GGR_INJECT_ANTI_ANTI_DEBUGGER__
-    await hooks.mainFlowWillLaunch?.promise({
-      jobNotMatchStrategy,
-      jobNotActiveStrategy,
-      expectCityNotMatchStrategy,
-      blockJobNotSuit,
-      blockBossNotActive,
-      blockBossNotNewChat
-    })
-    await toRecommendPage(hooks)
-    // goto search
-
-    // ;await browser.close()
-  } catch (err) {
-    closeBrowserWindow()
-    throw err
+  const { isFreshLaunch } = await ensureBrowser(hooks)
+  await ensurePage(hooks)
+  if (isFreshLaunch) {
+    // 只在新开浏览器时恢复登录态；复用时浏览器里的实时会话就是最新的，不要用旧文件覆盖
+    await restoreLoginSession(hooks)
+  } else {
+    console.log('[Browser] 复用已打开的浏览器，重新进入流程')
   }
+  await page.bringToFront()
+  // __GGR_INJECT_ANTI_ANTI_DEBUGGER__
+  await hooks.mainFlowWillLaunch?.promise({
+    jobNotMatchStrategy,
+    jobNotActiveStrategy,
+    expectCityNotMatchStrategy,
+    expectWorkExpNotMatchStrategy,
+    expectSalaryNotMatchStrategy,
+    blockCompanyNameRegMatchStrategy,
+    blockJobKeywordMatchStrategy,
+    blockJobNotSuit,
+    blockBossNotActive,
+    blockBossNotNewChat
+  })
+  await toRecommendPage(hooks)
 }
 
 export async function closeBrowserWindow () {
-  browser?.close()
-  const browserProcess = browser?.process()
-  if (browserProcess) {
+  const browserToClose = browser
+  browser = null
+  page = null
+  if (!browserToClose) {
+    return
+  }
+  try {
+    await Promise.race([
+      browserToClose.close(),
+      sleep(5000)
+    ])
+  } catch {}
+  const browserProcess = browserToClose.process()
+  if (browserProcess && browserProcess.exitCode === null) {
     try {
       process.kill(browserProcess.pid)
     }
     catch {}
   }
-  browser = null
-  page = null
 }
+//#endregion
 
 async function storeStorage (page) {
   const [

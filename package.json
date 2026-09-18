@@ -6,7 +6,10 @@
   "module": "./main/index.mjs",
   "type": "module",
   "scripts": {
-    "start": "node ./packages/run-core-of-geek-auto-start-chat-with-boss/daemon-main.mjs"
+    "start": "node ./packages/run-core-of-geek-auto-start-chat-with-boss/daemon-main.mjs",
+    "test": "npm run test:unit && npm run test:smoke",
+    "test:unit": "node --test packages/geek-auto-start-chat-with-boss/job-filter.test.mjs",
+    "test:smoke": "node --import ./packages/run-core-of-geek-auto-start-chat-with-boss/register-hooks.mjs --test ./packages/run-core-of-geek-auto-start-chat-with-boss/main-flow-smoke.test.mjs"
   },
   "author": "geekgeekrun",
   "license": "ISC",

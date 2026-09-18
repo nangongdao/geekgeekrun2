@@ -343,8 +343,9 @@
               </div>
             </el-form-item>
             <div class="h-1px bg-#f0f0f0" mt16px mb8px />
+            <!-- 不期望投递公司（关键词） -->
             <div
-              ref="blockCompanyNameRegExpSectionEl"
+              ref="blockCompanyKeywordSectionEl"
               font-size-14px
               flex
               :style="{
@@ -355,7 +356,7 @@
               }"
             >
               <div mb6px>
-                不期望投递公司<b color-orange>正则</b>&nbsp;<el-tooltip
+                不期望投递公司<b color-orange>关键词</b>&nbsp;<el-tooltip
                   effect="light"
                   placement="bottom-start"
                   @show="gtagRenderer('tooltip_show_about_expect_company_figure')"
@@ -367,16 +368,16 @@
                     ><span><QuestionFilled w-1em h-1em mr2px /></span>公司信息UI位置图示</el-button
                   ></el-tooltip
                 ><br /><span font-size-12px
-                  ><b color-orange>正则表达式</b>，不区分大小写；输入框留空表示不筛选；<span
+                  ><b color-orange>逗号分隔</b
+                  >，不区分大小写；公司名称包含任一关键词即视为不期望投递；输入框留空表示不筛选；<span
                     color-orange
                     >优先级高于上方“期望投递公司”</span
-                  ><br />请<b color-red>小心验证</b
-                  >你编写的正则，填写太过于宽泛的正则（例如`.*`）将导致任何职位都不会开聊</span
+                  ></span
                 >
               </div>
               <el-dropdown
                 v-if="!formContent.fieldsForUseCommonConfig.blockCompanyNameRegExpStr"
-                @command="handleBlockCompanyNameRegExpTemplateClicked"
+                @command="handleBlockCompanyKeywordTemplateClicked"
               >
                 <el-button size="small"
                   >公司列表模板 <el-icon class="el-icon--right"><arrow-down /></el-icon
@@ -384,7 +385,7 @@
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item
-                      v-for="item in blockCompanyNameRegExpTemplateList"
+                      v-for="item in blockCompanyKeywordTemplateList"
                       :key="item.name"
                       :command="item"
                       >{{ item.name }}</el-dropdown-item
@@ -413,7 +414,7 @@
                     ml-10px
                     @click="
                       handleClickConfigCommonJobCondition({
-                        entry: 'block-company-name-reg-exp-field'
+                        entry: 'block-company-keyword-field'
                       })
                     "
                     >编辑公共职位筛选条件</el-button
@@ -422,7 +423,7 @@
                     v-else
                     size="small"
                     ml-10px
-                    @click="fillCommonConfigField('blockCompanyNameRegExpStr')"
+                    @click="fillCommonConfigField('blockCompanyKeyword')"
                     >填入公共职位筛选条件的值</el-button
                   >
                 </div>
@@ -430,7 +431,7 @@
                   :key="!formContent.fieldsForUseCommonConfig.blockCompanyNameRegExpStr"
                   :prop="
                     !formContent.fieldsForUseCommonConfig.blockCompanyNameRegExpStr
-                      ? 'blockCompanyNameRegExpStr'
+                      ? 'blockCompanyKeywordText'
                       : undefined
                   "
                   mb0
@@ -438,27 +439,72 @@
                 >
                   <el-input
                     v-if="!formContent.fieldsForUseCommonConfig.blockCompanyNameRegExpStr"
-                    v-model="formContent.blockCompanyNameRegExpStr"
+                    v-model="formContent.blockCompanyKeywordText"
                     :autosize="{ minRows: 4 }"
                     max-h-8lh
                     type="textarea"
-                    placeholder="置空表示“不限公司，任意公司都不会被标记为不合适”"
+                    placeholder="例如：外包,劳务派遣,某某科技；置空表示“不限公司，任意公司都不会被标记为不合适”"
                     @blur="
-                      formContent.blockCompanyNameRegExpStr =
-                        formContent.blockCompanyNameRegExpStr?.trim() ?? ''
+                      formContent.blockCompanyKeywordText = normalizeCommaSplittedStr(
+                        formContent.blockCompanyKeywordText
+                      )
                     "
                   />
                   <el-input
                     v-else
                     inert
                     disabled
-                    :model-value="commonJobConditionConfig.blockCompanyNameRegExpStr"
+                    :model-value="commonJobConditionConfig.blockCompanyKeywordText"
                     :autosize="{ minRows: 4 }"
                     max-h-8lh
                     type="textarea"
                     placeholder="置空表示“不限公司，任意公司都不会被标记为不合适”"
                   />
                 </el-form-item>
+                <div
+                  v-if="
+                    (!formContent.fieldsForUseCommonConfig.blockCompanyNameRegExpStr
+                      ? formContent
+                      : commonJobConditionConfig
+                    ).blockCompanyKeywordText?.trim()
+                  "
+                  font-size-12px
+                  flex
+                  flex-items-center
+                  gap-10px
+                  mt6px
+                >
+                  <span white-space-nowrap>排除词：</span>
+                  <el-form-item
+                    :prop="
+                      !formContent.fieldsForUseCommonConfig.blockCompanyNameRegExpStr
+                        ? 'blockCompanyKeywordExcludeText'
+                        : undefined
+                    "
+                    mb0
+                    flex-1
+                  >
+                    <el-input
+                      v-if="!formContent.fieldsForUseCommonConfig.blockCompanyNameRegExpStr"
+                      v-model="formContent.blockCompanyKeywordExcludeText"
+                      size="small"
+                      placeholder="例如：非外包,自研；公司名称命中这些词时不屏蔽，逗号分隔"
+                      @blur="
+                        formContent.blockCompanyKeywordExcludeText = normalizeCommaSplittedStr(
+                          formContent.blockCompanyKeywordExcludeText
+                        )
+                      "
+                    />
+                    <el-input
+                      v-else
+                      inert
+                      disabled
+                      size="small"
+                      :model-value="commonJobConditionConfig.blockCompanyKeywordExcludeText"
+                      placeholder="公司名称命中这些词时不屏蔽"
+                    />
+                  </el-form-item>
+                </div>
               </div>
               <div
                 :style="{
@@ -468,7 +514,7 @@
                   ...((!formContent.fieldsForUseCommonConfig.blockCompanyNameRegExpStr
                     ? formContent
                     : commonJobConditionConfig
-                  ).blockCompanyNameRegExpStr?.length
+                  ).blockCompanyKeywordText?.length
                     ? {
                         borderLeft: '1px solid #f0f0f0'
                       }
@@ -485,7 +531,7 @@
                     width: '100%'
                   }"
                 >
-                  <div font-size-12px>当前职位对应公司名称与不期望投递公司正则匹配时：</div>
+                  <div font-size-12px>当前职位对应公司名称包含不期望投递公司关键词时：</div>
                   <el-select
                     v-model="formContent.blockCompanyNameRegMatchStrategy"
                     @change="
@@ -500,6 +546,247 @@
                       >{{ op.name }}</el-option
                     >
                   </el-select>
+                </el-form-item>
+              </div>
+            </div>
+            <div class="h-1px bg-#f0f0f0" mt16px mb8px />
+            <!-- 不期望投递职位（关键词） -->
+            <div
+              ref="blockJobKeywordSectionEl"
+              font-size-14px
+              flex
+              :style="{
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+                width: '100%',
+                lineHeight: '1.25em'
+              }"
+            >
+              <div mb6px>
+                不期望投递职位<b color-orange>关键词</b><br /><span font-size-12px
+                  ><b color-orange>逗号分隔</b>，不区分大小写；职位名称 / 类型 /
+                  描述中包含任一关键词即视为不期望投递，直接跳过；输入框留空表示不筛选；<span
+                    color-orange
+                    >优先级高于下方“期望职位信息”正则</span
+                  ><br />命中职位名称的职位会在列表阶段就被跳过，不会点开详情；<span color-orange
+                    >排除词</span
+                  >可放行误伤（例如屏蔽“外包”、但把“非外包”填进排除词）</span
+                >
+              </div>
+              <el-dropdown
+                v-if="!formContent.fieldsForUseCommonConfig.blockJobKeyword"
+                @command="handleBlockJobKeywordTemplateClicked"
+              >
+                <el-button size="small"
+                  >关键词模板 <el-icon class="el-icon--right"><arrow-down /></el-icon
+                ></el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item
+                      v-for="item in blockJobKeywordTemplateList"
+                      :key="item.name"
+                      :command="item"
+                      >{{ item.name }}</el-dropdown-item
+                    >
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+            <div
+              class="block-job-filter-wrap"
+              :style="{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '10px'
+              }"
+            >
+              <div w-full>
+                <div flex flex-items-center>
+                  <el-checkbox v-model="formContent.fieldsForUseCommonConfig.blockJobKeyword"
+                    >使用在“公共职位筛选条件”中设置的值</el-checkbox
+                  >
+                  <el-button
+                    v-if="formContent.fieldsForUseCommonConfig.blockJobKeyword"
+                    size="small"
+                    ml-10px
+                    @click="
+                      handleClickConfigCommonJobCondition({
+                        entry: 'block-job-keyword-field'
+                      })
+                    "
+                    >编辑公共职位筛选条件</el-button
+                  >
+                  <el-button
+                    v-else
+                    size="small"
+                    ml-10px
+                    @click="fillCommonConfigField('blockJobKeyword')"
+                    >填入公共职位筛选条件的值</el-button
+                  >
+                </div>
+                <el-form-item
+                  :key="!formContent.fieldsForUseCommonConfig.blockJobKeyword"
+                  :prop="
+                    !formContent.fieldsForUseCommonConfig.blockJobKeyword
+                      ? 'blockJobKeywordText'
+                      : undefined
+                  "
+                  mb0
+                  w-full
+                >
+                  <el-input
+                    v-if="!formContent.fieldsForUseCommonConfig.blockJobKeyword"
+                    v-model="formContent.blockJobKeywordText"
+                    :autosize="{ minRows: 3 }"
+                    max-h-8lh
+                    type="textarea"
+                    placeholder="例如：外包,驻场,销售,实习；置空表示“不按职位关键词筛选”"
+                    @blur="
+                      formContent.blockJobKeywordText = normalizeCommaSplittedStr(
+                        formContent.blockJobKeywordText
+                      )
+                    "
+                  />
+                  <el-input
+                    v-else
+                    inert
+                    disabled
+                    :model-value="commonJobConditionConfig.blockJobKeywordText"
+                    :autosize="{ minRows: 3 }"
+                    max-h-8lh
+                    type="textarea"
+                    placeholder="置空表示“不按职位关键词筛选”"
+                  />
+                </el-form-item>
+                <div
+                  v-if="
+                    (!formContent.fieldsForUseCommonConfig.blockJobKeyword
+                      ? formContent
+                      : commonJobConditionConfig
+                    ).blockJobKeywordText?.trim()
+                  "
+                  font-size-12px
+                  flex
+                  flex-items-center
+                  gap-10px
+                  mt6px
+                >
+                  <span>关键词匹配范围：</span>
+                  <el-checkbox-group
+                    v-if="!formContent.fieldsForUseCommonConfig.blockJobKeyword"
+                    v-model="formContent.blockJobKeywordMatchFields"
+                    size="small"
+                  >
+                    <el-checkbox
+                      v-for="field in JOB_KEYWORD_MATCH_FIELDS"
+                      :key="field.key"
+                      :label="field.key"
+                      >{{ field.label }}</el-checkbox
+                    >
+                  </el-checkbox-group>
+                  <el-checkbox-group
+                    v-else
+                    :model-value="commonJobConditionConfig.blockJobKeywordMatchFields"
+                    disabled
+                    inert
+                    size="small"
+                  >
+                    <el-checkbox
+                      v-for="field in JOB_KEYWORD_MATCH_FIELDS"
+                      :key="field.key"
+                      :label="field.key"
+                      >{{ field.label }}</el-checkbox
+                    >
+                  </el-checkbox-group>
+                </div>
+                <div
+                  v-if="
+                    (!formContent.fieldsForUseCommonConfig.blockJobKeyword
+                      ? formContent
+                      : commonJobConditionConfig
+                    ).blockJobKeywordText?.trim()
+                  "
+                  font-size-12px
+                  flex
+                  flex-items-center
+                  gap-10px
+                  mt6px
+                >
+                  <span white-space-nowrap>排除词：</span>
+                  <el-form-item
+                    :prop="
+                      !formContent.fieldsForUseCommonConfig.blockJobKeyword
+                        ? 'blockJobKeywordExcludeText'
+                        : undefined
+                    "
+                    mb0
+                    flex-1
+                  >
+                    <el-input
+                      v-if="!formContent.fieldsForUseCommonConfig.blockJobKeyword"
+                      v-model="formContent.blockJobKeywordExcludeText"
+                      size="small"
+                      placeholder="例如：非外包,自研；职位名称 / 类型 / 描述命中这些词时不屏蔽，逗号分隔"
+                      @blur="
+                        formContent.blockJobKeywordExcludeText = normalizeCommaSplittedStr(
+                          formContent.blockJobKeywordExcludeText
+                        )
+                      "
+                    />
+                    <el-input
+                      v-else
+                      inert
+                      disabled
+                      size="small"
+                      :model-value="commonJobConditionConfig.blockJobKeywordExcludeText"
+                      placeholder="职位信息命中这些词时不屏蔽"
+                    />
+                  </el-form-item>
+                </div>
+              </div>
+              <div
+                :style="{
+                  width: '400px',
+                  paddingLeft: '10px',
+                  flex: `0 0 auto`,
+                  ...((!formContent.fieldsForUseCommonConfig.blockJobKeyword
+                    ? formContent
+                    : commonJobConditionConfig
+                  ).blockJobKeywordText?.length
+                    ? {
+                        borderLeft: '1px solid #f0f0f0'
+                      }
+                    : {
+                        borderLeft: '1px solid transparent',
+                        visibility: 'hidden',
+                        opacity: 0
+                      })
+                }"
+              >
+                <el-form-item
+                  mb10px
+                  :style="{
+                    width: '100%'
+                  }"
+                >
+                  <div font-size-12px>当前职位包含不期望投递职位关键词时：</div>
+                  <el-select
+                    v-model="formContent.blockJobKeywordMatchStrategy"
+                    @change="
+                      (value) => gtagRenderer('block_job_keyword_match_strategy_changed', { value })
+                    "
+                  >
+                    <el-option
+                      v-for="op in strategyOptionWhenCurrentJobNotMatch"
+                      :key="op.value"
+                      :label="op.name"
+                      :value="op.value"
+                      >{{ op.name }}</el-option
+                    >
+                  </el-select>
+                  <div font-size-12px color-gray mt4px lh-1.4em>
+                    选择“仅在本次运行中记录不合适”时，命中职位名称的职位无需点开详情即可跳过，速度最快
+                  </div>
                 </el-form-item>
               </div>
             </div>
@@ -1750,16 +2037,26 @@ import {
   ensureSalaryRangeCorrect,
   getRuleOfExpectJobNameRegExpStr,
   getRuleOfExpectJobDescRegExpStr,
-  getRuleOfBlockCompanyNameRegExpStr,
+  getRuleOfBlockKeywordText,
   expectCompanyTemplateList,
-  blockCompanyNameRegExpTemplateList,
+  blockCompanyKeywordTemplateList,
+  blockJobKeywordTemplateList,
   getHandlerForExpectCompanyTemplateClicked,
   getHandlerForExpectJobFilterTemplateClicked,
-  getHandlerForBlockCompanyNameRegExpTemplateClicked,
+  getHandlerForBlockCompanyKeywordTemplateClicked,
+  getHandlerForBlockJobKeywordTemplateClicked,
   getRuleOfExpectJobTypeRegExpStr,
   jobDetailRegExpMatchLogicOptions,
   getHandlerForExpectSalaryCalculateWayChanged,
-  normalizeCommaSplittedStr
+  normalizeCommaSplittedStr,
+  JOB_KEYWORD_MATCH_FIELDS,
+  DEFAULT_JOB_KEYWORD_MATCH_FIELDS,
+  readBlockCompanyKeywordText,
+  readBlockCompanyKeywordExcludeText,
+  readBlockJobKeywordText,
+  readBlockJobKeywordExcludeText,
+  readBlockJobKeywordMatchFields,
+  serializeBlockKeywordFields
 } from './common'
 const { ipcRenderer } = window.electron
 const gtagRenderer = (name, params?: object) => {
@@ -1812,8 +2109,17 @@ const formContent = ref({
   isSageTimeEnabled: true,
   sageTimeOpTimes: 100,
   sageTimePauseMinute: 15,
-  blockCompanyNameRegExpStr: '',
+  // 不期望投递公司（关键词，逗号分隔文本；保存时转为 blockCompanyKeywordList）
+  blockCompanyKeywordText: '',
+  // 公司排除词（命中则不屏蔽，逗号分隔文本；保存时转为 blockCompanyKeywordExcludeList）
+  blockCompanyKeywordExcludeText: '',
   blockCompanyNameRegMatchStrategy: MarkAsNotSuitOp.NO_OP,
+  // 不期望投递职位（关键词，逗号分隔文本；保存时转为 blockJobKeywordList）
+  blockJobKeywordText: '',
+  // 职位排除词（命中则不屏蔽，逗号分隔文本；保存时转为 blockJobKeywordExcludeList）
+  blockJobKeywordExcludeText: '',
+  blockJobKeywordMatchFields: [...DEFAULT_JOB_KEYWORD_MATCH_FIELDS],
+  blockJobKeywordMatchStrategy: MarkAsNotSuitOp.NO_OP,
   fieldsForUseCommonConfig: {}
 })
 
@@ -1972,10 +2278,21 @@ electron.ipcRenderer.invoke('fetch-config-file-content').then((res) => {
     parseFloat(res.config['boss.json'].sageTimePauseMinute) < 0
       ? 15
       : parseFloat(res.config['boss.json'].sageTimePauseMinute)
-  formContent.value.blockCompanyNameRegExpStr =
-    res.config['boss.json'].blockCompanyNameRegExpStr?.trim() ?? ''
+  formContent.value.blockCompanyKeywordText = readBlockCompanyKeywordText(res.config['boss.json'])
+  formContent.value.blockCompanyKeywordExcludeText = readBlockCompanyKeywordExcludeText(
+    res.config['boss.json']
+  )
   formContent.value.blockCompanyNameRegMatchStrategy =
     res.config['boss.json'].blockCompanyNameRegMatchStrategy ?? MarkAsNotSuitOp.NO_OP
+  formContent.value.blockJobKeywordText = readBlockJobKeywordText(res.config['boss.json'])
+  formContent.value.blockJobKeywordExcludeText = readBlockJobKeywordExcludeText(
+    res.config['boss.json']
+  )
+  formContent.value.blockJobKeywordMatchFields = readBlockJobKeywordMatchFields(
+    res.config['boss.json']
+  )
+  formContent.value.blockJobKeywordMatchStrategy =
+    res.config['boss.json'].blockJobKeywordMatchStrategy ?? MarkAsNotSuitOp.NO_OP
   formContent.value.fieldsForUseCommonConfig =
     res.config['boss.json']?.fieldsForUseCommonConfig ?? {}
 
@@ -1992,8 +2309,19 @@ electron.ipcRenderer.invoke('fetch-config-file-content').then((res) => {
     expectCompanies: (res.config['common-job-condition-config.json']?.expectCompanies ?? []).join(
       ','
     ),
-    blockCompanyNameRegExpStr:
-      res.config['common-job-condition-config.json']?.blockCompanyNameRegExpStr ?? '',
+    blockCompanyKeywordText: readBlockCompanyKeywordText(
+      res.config['common-job-condition-config.json']
+    ),
+    blockCompanyKeywordExcludeText: readBlockCompanyKeywordExcludeText(
+      res.config['common-job-condition-config.json']
+    ),
+    blockJobKeywordText: readBlockJobKeywordText(res.config['common-job-condition-config.json']),
+    blockJobKeywordExcludeText: readBlockJobKeywordExcludeText(
+      res.config['common-job-condition-config.json']
+    ),
+    blockJobKeywordMatchFields: readBlockJobKeywordMatchFields(
+      res.config['common-job-condition-config.json']
+    ),
     expectSalaryCalculateWay:
       res.config['common-job-condition-config.json']?.expectSalaryCalculateWay ??
       SalaryCalculateWay.MONTH_SALARY,
@@ -2005,7 +2333,8 @@ electron.ipcRenderer.invoke('fetch-config-file-content').then((res) => {
 
 const jobSourceFormItemSectionEl = ref()
 const jobDetailRegExpSectionEl = ref()
-const blockCompanyNameRegExpSectionEl = ref()
+const blockCompanyKeywordSectionEl = ref()
+const blockJobKeywordSectionEl = ref()
 const formRules = {
   expectJobNameRegExpStr: {
     trigger: 'blur',
@@ -2076,9 +2405,39 @@ const formRules = {
       cb()
     }
   },
-  blockCompanyNameRegExpStr: {
+  blockCompanyKeywordText: {
     trigger: 'blur',
-    validator: getRuleOfBlockCompanyNameRegExpStr({ gtagRenderer, blockCompanyNameRegExpSectionEl })
+    validator: getRuleOfBlockKeywordText({
+      gtagRenderer,
+      sectionEl: blockCompanyKeywordSectionEl,
+      tag: 'bck'
+    })
+  },
+  blockJobKeywordText: {
+    trigger: 'blur',
+    validator: getRuleOfBlockKeywordText({
+      gtagRenderer,
+      sectionEl: blockJobKeywordSectionEl,
+      tag: 'bjk'
+    })
+  },
+  blockCompanyKeywordExcludeText: {
+    trigger: 'blur',
+    validator: getRuleOfBlockKeywordText({
+      gtagRenderer,
+      sectionEl: blockCompanyKeywordSectionEl,
+      tag: 'bcke',
+      kind: 'exclude'
+    })
+  },
+  blockJobKeywordExcludeText: {
+    trigger: 'blur',
+    validator: getRuleOfBlockKeywordText({
+      gtagRenderer,
+      sectionEl: blockJobKeywordSectionEl,
+      tag: 'bjke',
+      kind: 'exclude'
+    })
   }
 }
 
@@ -2129,12 +2488,10 @@ const handleSubmit = async () => {
     console.log(err)
     return
   }
-  const clonedFormContent = JSON.parse(JSON.stringify(formContent.value))
-  clonedFormContent.jobSourceList = formatJobSourceFormValueToConfig(
-    clonedFormContent.__jobSourceList
+  await electron.ipcRenderer.invoke(
+    'save-config-file-from-ui',
+    JSON.stringify(buildConfigPayloadFromForm())
   )
-  delete clonedFormContent.__jobSourceList
-  await electron.ipcRenderer.invoke('save-config-file-from-ui', JSON.stringify(clonedFormContent))
   mittBus.emit('auto-start-chat-with-boss-config-saved')
   gtagRenderer('config_saved_and_launch_auto_start_chat', {
     has_dingtalk_robot_token: !!formContent.value?.dingtalkRobotAccessToken
@@ -2188,15 +2545,30 @@ const handleSave = async () => {
     console.log(err)
     return
   }
+  await electron.ipcRenderer.invoke(
+    'save-config-file-from-ui',
+    JSON.stringify(buildConfigPayloadFromForm())
+  )
+  mittBus.emit('auto-start-chat-with-boss-config-saved')
+  ElMessage.success('配置保存成功')
+  gtagRenderer('config_saved')
+}
+
+/**
+ * 表单值 -> 保存到 boss.json 的 payload：
+ * - 职位来源拖拽结果转为 jobSourceList
+ * - 关键词文本框转为关键词数织
+ */
+function buildConfigPayloadFromForm() {
   const clonedFormContent = JSON.parse(JSON.stringify(formContent.value))
   clonedFormContent.jobSourceList = formatJobSourceFormValueToConfig(
     clonedFormContent.__jobSourceList
   )
   delete clonedFormContent.__jobSourceList
-  await electron.ipcRenderer.invoke('save-config-file-from-ui', JSON.stringify(clonedFormContent))
-  mittBus.emit('auto-start-chat-with-boss-config-saved')
-  ElMessage.success('配置保存成功')
-  gtagRenderer('config_saved')
+  if (!clonedFormContent.blockJobKeywordMatchFields?.length) {
+    clonedFormContent.blockJobKeywordMatchFields = [...DEFAULT_JOB_KEYWORD_MATCH_FIELDS]
+  }
+  return serializeBlockKeywordFields(clonedFormContent)
 }
 
 const handleExpectCompanyTemplateClicked = getHandlerForExpectCompanyTemplateClicked({
@@ -2382,19 +2754,30 @@ const handleStopButtonClick = async () => {
   }
 }
 
-const handleBlockCompanyNameRegExpTemplateClicked =
-  getHandlerForBlockCompanyNameRegExpTemplateClicked({
-    gtagRenderer,
-    formContent
-  })
+const handleBlockCompanyKeywordTemplateClicked = getHandlerForBlockCompanyKeywordTemplateClicked({
+  gtagRenderer,
+  formContent
+})
 
-const commonJobConditionConfig = ref({})
+const handleBlockJobKeywordTemplateClicked = getHandlerForBlockJobKeywordTemplateClicked({
+  gtagRenderer,
+  formContent
+})
+
+// 公共职位筛选条件的内容按“原样透传”处理：这里只关心字段名，
+// 显式声明成宽松的字典类型，避免模板里每次取字段都被判定为“不存在”。
+const commonJobConditionConfig = ref<Record<string, any>>({})
 const unListenCommonJobConditionConfig = ipcRenderer.on(
   'common-job-condition-config-updated',
   (_, { config }) => {
     commonJobConditionConfig.value = {
       ...config,
-      expectCompanies: config?.expectCompanies?.map((it) => it.trim())?.join(',') ?? ''
+      expectCompanies: config?.expectCompanies?.map((it) => it.trim())?.join(',') ?? '',
+      blockCompanyKeywordText: readBlockCompanyKeywordText(config),
+      blockCompanyKeywordExcludeText: readBlockCompanyKeywordExcludeText(config),
+      blockJobKeywordText: readBlockJobKeywordText(config),
+      blockJobKeywordExcludeText: readBlockJobKeywordExcludeText(config),
+      blockJobKeywordMatchFields: readBlockJobKeywordMatchFields(config)
     }
   }
 )
@@ -2413,7 +2796,7 @@ const handleClickConfigCommonJobCondition = async ({ entry }) => {
 
 const fillCommonConfigField = (field) => {
   gtagRenderer('fill_common_config_field_clicked', { field })
-  let fieldsToReplace = []
+  let fieldsToReplace: string[] = []
   switch (field) {
     case 'salary': {
       fieldsToReplace = ['expectSalaryCalculateWay', 'expectSalaryLow', 'expectSalaryHigh']
@@ -2436,8 +2819,16 @@ const fillCommonConfigField = (field) => {
       fieldsToReplace = ['expectCompanies']
       break
     }
-    case 'blockCompanyNameRegExpStr': {
-      fieldsToReplace = ['blockCompanyNameRegExpStr']
+    case 'blockCompanyKeyword': {
+      fieldsToReplace = ['blockCompanyKeywordText', 'blockCompanyKeywordExcludeText']
+      break
+    }
+    case 'blockJobKeyword': {
+      fieldsToReplace = [
+        'blockJobKeywordText',
+        'blockJobKeywordExcludeText',
+        'blockJobKeywordMatchFields'
+      ]
       break
     }
   }
@@ -2518,7 +2909,8 @@ const fillCommonConfigField = (field) => {
     line-height: 1.2em;
   }
   .job-detail-filter-wrap .el-form-item__error,
-  .block-company-filter-wrap .el-form-item__error {
+  .block-company-filter-wrap .el-form-item__error,
+  .block-job-filter-wrap .el-form-item__error {
     position: static;
     word-break: break-word;
   }

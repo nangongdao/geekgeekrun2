@@ -140,75 +140,66 @@ export default class SqlitePlugin {
         jobNotMatchStrategy,
         jobNotActiveStrategy,
         expectCityNotMatchStrategy,
+        expectWorkExpNotMatchStrategy,
+        expectSalaryNotMatchStrategy,
+        blockCompanyNameRegMatchStrategy,
+        blockJobKeywordMatchStrategy,
         blockJobNotSuit,
         blockBossNotActive,
         blockBossNotNewChat
       }) => {
-        if (
-          jobNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL ||
-          jobNotActiveStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL ||
-          expectCityNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL
-        ) {
-          const ds = await this.initPromise;
+        const ds = await this.initPromise;
+
+        // “策略 -> 不合适原因”的对应关系。
+        // 只要策略真的会在库里留痕（本地标记或 BOSS 标记，两者都会写 MarkAsNotSuitLog），
+        // 就把最近 7 天同原因的记录纳入本次运行的跳过集合。
+        //
+        // 这里刻意不再用“是否存在 LOCAL 策略”作为整段逻辑的开关：
+        // 默认配置（jobNotMatchStrategy / jobNotActiveStrategy = MARK_AS_NOT_SUIT_ON_BOSS）下
+        // 这个开关恒为 false，会连带把下面的 30 天已开聊 BOSS 去重一起吞掉。
+        const strategyToReasonList: Array<[MarkAsNotSuitOp | undefined, MarkAsNotSuitReason]> = [
+          [jobNotMatchStrategy, MarkAsNotSuitReason.JOB_NOT_SUIT],
+          [jobNotActiveStrategy, MarkAsNotSuitReason.BOSS_INACTIVE],
+          [expectCityNotMatchStrategy, MarkAsNotSuitReason.JOB_CITY_NOT_SUIT],
+          [expectWorkExpNotMatchStrategy, MarkAsNotSuitReason.JOB_WORK_EXP_NOT_SUIT],
+          [expectSalaryNotMatchStrategy, MarkAsNotSuitReason.JOB_SALARY_NOT_SUIT],
+          [blockCompanyNameRegMatchStrategy, MarkAsNotSuitReason.COMPANY_NAME_NOT_SUIT],
+          [blockJobKeywordMatchStrategy, MarkAsNotSuitReason.JOB_KEYWORD_NOT_SUIT],
+        ];
+        const reasonsToBlock = strategyToReasonList
+          .filter(
+            ([strategy]) =>
+              strategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL ||
+              strategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS
+          )
+          .map(([, reason]) => reason);
+        // 职位被手动标记不合适时同样不该再投，沿用 JOB_NOT_SUIT 的开关
+        if (reasonsToBlock.includes(MarkAsNotSuitReason.JOB_NOT_SUIT)) {
+          reasonsToBlock.push(MarkAsNotSuitReason.USER_MANUAL_OPERATION_WITH_UNKNOWN_REASON);
+        }
+        if (reasonsToBlock.length > 0) {
           const last7DayMarkRecords = (await getNotSuitMarkRecordsInLastSomeDays(ds, 7)) ?? [];
-          if (
-            jobNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL ||
-            jobNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS
-          ) {
-            last7DayMarkRecords
-              .filter(it =>
-                [
-                  MarkAsNotSuitReason.JOB_NOT_SUIT,
-                  MarkAsNotSuitReason.USER_MANUAL_OPERATION_WITH_UNKNOWN_REASON
-                ].includes(it.markReason)
-              )
-              .map(
-                it => it.encryptJobId
-              )
-              .forEach(
-                id => blockJobNotSuit.add(id)
-              )
-          }
-          if (
-            jobNotActiveStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL ||
-            jobNotActiveStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS
-          ) {
-            last7DayMarkRecords
-              .filter(it => it.markReason === MarkAsNotSuitReason.BOSS_INACTIVE)
-              .map(
-                it => it.encryptJobId
-              )
-              .forEach(
-                id => blockJobNotSuit.add(id)
-              )
-          }
-          if (
-            expectCityNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_LOCAL ||
-            expectCityNotMatchStrategy === MarkAsNotSuitOp.MARK_AS_NOT_SUIT_ON_BOSS
-          ) {
-            last7DayMarkRecords
-              .filter(it => it.markReason === MarkAsNotSuitReason.JOB_CITY_NOT_SUIT)
-              .map(
-                it => it.encryptJobId
-              )
-              .forEach(
-                id => blockJobNotSuit.add(id)
-              )
-          }
-          const last30DayChatStartupRecords = (await getChatStartupRecordsInLastSomeDays(ds, 30)) ?? [];
-          const chattedJobIds = last30DayChatStartupRecords.map(it => it.encryptJobId)
-          if (chattedJobIds.length === 0) {
-            return
-          }
-          const chattedJobIdChunks = chunk(chattedJobIds, 200)
-          const chattedBossIds = [];
-          for (const chattedJobIdChunk of chattedJobIdChunks) {
-            const chattedBossIdChunk = ((await getBossIdsByJobIds(ds, chattedJobIdChunk)) ?? []).map(it => it.encryptBossId)
-            chattedBossIds.push(...chattedBossIdChunk)
-          }
-          for (const id of chattedBossIds) {
-            blockBossNotNewChat.add(id)
-          }
+          last7DayMarkRecords
+            .filter(it => reasonsToBlock.includes(it.markReason))
+            .map(it => it.encryptJobId)
+            .forEach(id => blockJobNotSuit.add(id));
+        }
+
+        // 30 天内已经开聊过的 BOSS 不再重复开聊。
+        // 这条与“不合适策略”无关，属于核心去重，必须无条件生效。
+        const last30DayChatStartupRecords = (await getChatStartupRecordsInLastSomeDays(ds, 30)) ?? [];
+        const chattedJobIds = last30DayChatStartupRecords.map(it => it.encryptJobId);
+        if (chattedJobIds.length === 0) {
+          return;
+        }
+        const chattedJobIdChunks = chunk(chattedJobIds, 200);
+        const chattedBossIds = [];
+        for (const chattedJobIdChunk of chattedJobIdChunks) {
+          const chattedBossIdChunk = ((await getBossIdsByJobIds(ds, chattedJobIdChunk)) ?? []).map(it => it.encryptBossId);
+          chattedBossIds.push(...chattedBossIdChunk);
+        }
+        for (const id of chattedBossIds) {
+          blockBossNotNewChat.add(id);
         }
       }
     );

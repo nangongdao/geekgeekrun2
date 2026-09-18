@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "start": "node ./daemon-main.mjs",
-    "start:bare": "node ./main.mjs"
+    "start:bare": "node --import ./register-hooks.mjs ./main.mjs"
   },
   "author": "geekgeekrun",
   "license": "ISC",

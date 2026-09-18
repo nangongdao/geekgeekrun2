@@ -40,5 +40,12 @@
   "sageTimeOpTimes": 100,
   "sageTimePauseMinute": 15,
   "blockCompanyNameRegExpStr": "",
+  "blockCompanyKeywordList": [],
+  "blockCompanyKeywordExcludeList": [],
+  "blockCompanyNameRegMatchStrategy": 3,
+  "blockJobKeywordList": [],
+  "blockJobKeywordExcludeList": [],
+  "blockJobKeywordMatchFields": ["jobName", "jobType", "jobDesc"],
+  "blockJobKeywordMatchStrategy": 3,
   "fieldsForUseCommonConfig": {}
 }

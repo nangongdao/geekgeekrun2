@@ -92,9 +92,8 @@ const runAutoChat = async () => {
     }
   })
   process.env.PUPPETEER_EXECUTABLE_PATH = puppeteerExecutable.executablePath
-  const { initPuppeteer, mainLoop, closeBrowserWindow, autoStartChatEventBus } = await import(
-    '@geekgeekrun/geek-auto-start-chat-with-boss/index.mjs'
-  )
+  const { initPuppeteer, mainLoop, closeBrowserWindow, decideRecoveryAction, autoStartChatEventBus } =
+    await import('@geekgeekrun/geek-auto-start-chat-with-boss/index.mjs')
   process.on('disconnect', () => {
     closeBrowserWindow()
     app.exit()
@@ -153,16 +152,23 @@ const runAutoChat = async () => {
           break
         }
       }
-      closeBrowserWindow?.()
       console.error(err)
       const shouldExit = await checkShouldExit()
       if (shouldExit) {
+        await closeBrowserWindow()
         app.exit()
         return
       }
-      console.log(
-        `[Run core main] An internal error is caught, and browser will be restarted in ${rerunInterval}ms.`
-      )
+      if (decideRecoveryAction(err) === 'restart-browser') {
+        await closeBrowserWindow()
+        console.log(
+          `[Run core main] An internal error is caught, and browser will be restarted in ${rerunInterval}ms.`
+        )
+      } else {
+        console.log(
+          `[Run core main] An internal error is caught, browser is still alive and will be reused; flow will be re-entered in ${rerunInterval}ms.`
+        )
+      }
       await sleep(rerunInterval)
     }
   }

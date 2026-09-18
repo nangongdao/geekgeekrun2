@@ -24,36 +24,13 @@
           <ElTableColumn prop="bossName" label="BOSS" width="64" />
           <ElTableColumn prop="markReason" label="标记原因" width="250">
             <template #default="{ row }">
-              <template
-                v-if="
-                  [
-                    MarkAsNotSuitReason.BOSS_INACTIVE,
-                    MarkAsNotSuitReason.USER_MANUAL_OPERATION_WITH_UNKNOWN_REASON
-                  ].includes(row.markReason)
-                "
+              <strong>{{ getMarkAsNotSuitReasonText(row.markReason) }}</strong>
+              <pre
+                v-for="(line, lineIndex) in getReasonDetailLines(row)"
+                :key="lineIndex"
+                class="m-0 of-auto"
+                >{{ line }}</pre
               >
-                <strong>{{ markReasonTopicMap[row.markReason] }}</strong>
-                <pre class="m-0 of-auto">{{ formatMarkReason(row) }}</pre>
-              </template>
-              <template v-else-if="row.markReason === MarkAsNotSuitReason.JOB_NOT_SUIT">
-                <strong>{{ markReasonTopicMap[row.markReason] }}</strong>
-              </template>
-              <template v-if="row.markReason === MarkAsNotSuitReason.JOB_CITY_NOT_SUIT">
-                <strong>{{ markReasonTopicMap[row.markReason] }}</strong>
-                <pre class="m-0 of-auto">{{ formatMarkReason(row) }}</pre>
-              </template>
-              <template v-if="row.markReason === MarkAsNotSuitReason.JOB_WORK_EXP_NOT_SUIT">
-                <strong>{{ markReasonTopicMap[row.markReason] }}</strong>
-                <pre class="m-0 of-auto">{{ formatMarkReason(row) }}</pre>
-              </template>
-              <template v-if="row.markReason === MarkAsNotSuitReason.JOB_SALARY_NOT_SUIT">
-                <strong>{{ markReasonTopicMap[row.markReason] }}</strong>
-                <pre class="m-0 of-auto">{{ formatMarkReason(row) }}</pre>
-              </template>
-              <template v-if="row.markReason === MarkAsNotSuitReason.COMPANY_NAME_NOT_SUIT">
-                <strong>{{ markReasonTopicMap[row.markReason] }}</strong>
-                <pre class="m-0 of-auto">{{ formatMarkReason(row) }}</pre>
-              </template>
             </template>
           </ElTableColumn>
           <ElTableColumn prop="experienceName" label="工作经验" />
@@ -135,7 +112,8 @@ import { ElTable, ElTableColumn, ElButton, ElPagination, ElDrawer } from 'elemen
 import { type VMarkAsNotSuitLog } from '@geekgeekrun/sqlite-plugin/src/entity/VMarkAsNotSuitLog'
 import { PageReq, PagedRes } from '../../../../common/types/pagination'
 import JobInfoSnapshot from '../../features/JobInfoSnapshot/index.vue'
-import { MarkAsNotSuitReason } from '@geekgeekrun/sqlite-plugin/src/enums'
+import { MarkAsNotSuitReason, getMarkAsNotSuitReasonText } from '@geekgeekrun/sqlite-plugin/src/enums'
+import { JOB_KEYWORD_MATCH_FIELDS } from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
 import { transformUtcDateToLocalDate } from '@geekgeekrun/utils/date.mjs'
 import { gtagRenderer } from '@renderer/utils/gtag'
 
@@ -217,89 +195,53 @@ function handleViewJobSnapshotButtonClick(record: VMarkAsNotSuitLog) {
   drawVisibleModelValue.value = true
 }
 
-const markReasonTopicMap = {
-  [MarkAsNotSuitReason.BOSS_INACTIVE]: 'BOSS不活跃',
-  [MarkAsNotSuitReason.USER_MANUAL_OPERATION_WITH_UNKNOWN_REASON]: '手动标记不合适',
-  [MarkAsNotSuitReason.JOB_NOT_SUIT]: '职位不合适',
-  [MarkAsNotSuitReason.JOB_CITY_NOT_SUIT]: '工作地不合适',
-  [MarkAsNotSuitReason.JOB_WORK_EXP_NOT_SUIT]: '工作经验不合适',
-  [MarkAsNotSuitReason.JOB_SALARY_NOT_SUIT]: '薪资不合适',
-  [MarkAsNotSuitReason.COMPANY_NAME_NOT_SUIT]: '公司名称不匹配'
+/** extInfo 是历史遗留的 JSON 字符串字段，可能为空或非法，解析失败时按“没有补充信息”处理 */
+function parseExtInfo(row: VMarkAsNotSuitLog) {
+  try {
+    return JSON.parse(row.extInfo)
+  } catch {
+    return null
+  }
 }
 
-function formatMarkReason(row: VMarkAsNotSuitLog) {
+const jobKeywordMatchFieldLabelMap = Object.fromEntries(
+  JOB_KEYWORD_MATCH_FIELDS.map((it) => [it.key, it.label])
+)
+
+/**
+ * “标记原因”下方展示的补充说明，回答“为什么被标记”。
+ * 关键词屏蔽会把命中的关键词与字段写进 extInfo，这里如实展示，便于排查误伤。
+ */
+function getReasonDetailLines(row: VMarkAsNotSuitLog): string[] {
+  const extInfo = parseExtInfo(row)
+  const lines: Array<string | null | undefined> = []
   switch (row.markReason) {
     case MarkAsNotSuitReason.BOSS_INACTIVE: {
-      const extInfo = (() => {
-        try {
-          return JSON.parse(row.extInfo)
-        } catch {
-          return null
-        }
-      })()
-      return [
-        extInfo?.bossActiveTimeDesc && `BOSS活跃情况：${extInfo.bossActiveTimeDesc}`,
-        extInfo?.chosenReasonInUi?.text && `BOSS选项内容：${extInfo.chosenReasonInUi.text}`
-      ]
-        .filter(Boolean)
-        .join('\n')
-    }
-    case MarkAsNotSuitReason.USER_MANUAL_OPERATION_WITH_UNKNOWN_REASON: {
-      const extInfo = (() => {
-        try {
-          return JSON.parse(row.extInfo)
-        } catch {
-          return null
-        }
-      })()
-      return [extInfo?.chosenReasonInUi?.text && `BOSS选项内容：${extInfo.chosenReasonInUi.text}`]
-        .filter(Boolean)
-        .join('\n')
-    }
-    case MarkAsNotSuitReason.JOB_WORK_EXP_NOT_SUIT:
-    case MarkAsNotSuitReason.JOB_CITY_NOT_SUIT: {
-      const extInfo = (() => {
-        try {
-          return JSON.parse(row.extInfo)
-        } catch {
-          return null
-        }
-      })()
-      return [extInfo?.chosenReasonInUi?.text && `BOSS选项内容：${extInfo.chosenReasonInUi.text}`]
-        .filter(Boolean)
-        .join('\n')
+      lines.push(extInfo?.bossActiveTimeDesc && `BOSS活跃情况：${extInfo.bossActiveTimeDesc}`)
+      break
     }
     case MarkAsNotSuitReason.JOB_SALARY_NOT_SUIT: {
-      const extInfo = (() => {
-        try {
-          return JSON.parse(row.extInfo)
-        } catch {
-          return null
-        }
-      })()
-      return [
-        extInfo?.salaryDesc && `薪资：${extInfo.salaryDesc}`,
-        extInfo?.chosenReasonInUi?.text && `BOSS选项内容：${extInfo.chosenReasonInUi.text}`
-      ]
-        .filter(Boolean)
-        .join('\n')
+      lines.push(extInfo?.salaryDesc && `薪资：${extInfo.salaryDesc}`)
+      break
     }
     case MarkAsNotSuitReason.COMPANY_NAME_NOT_SUIT: {
-      const extInfo = (() => {
-        try {
-          return JSON.parse(row.extInfo)
-        } catch {
-          return null
-        }
-      })()
-      return [extInfo?.chosenReasonInUi?.text && `BOSS选项内容：${extInfo.chosenReasonInUi.text}`]
-        .filter(Boolean)
-        .join('\n')
+      lines.push(extInfo?.matchedKeyword && `命中关键词：${extInfo.matchedKeyword}`)
+      break
+    }
+    case MarkAsNotSuitReason.JOB_KEYWORD_NOT_SUIT: {
+      const fieldLabel = jobKeywordMatchFieldLabelMap[extInfo?.matchedField]
+      lines.push(
+        extInfo?.matchedKeyword &&
+          `命中关键词：${extInfo.matchedKeyword}${fieldLabel ? `（${fieldLabel}）` : ''}`
+      )
+      break
     }
     default: {
-      return ''
+      break
     }
   }
+  lines.push(extInfo?.chosenReasonInUi?.text && `BOSS选项内容：${extInfo.chosenReasonInUi.text}`)
+  return lines.filter((it): it is string => Boolean(it))
 }
 </script>
 

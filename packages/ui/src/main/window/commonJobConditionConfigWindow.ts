@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
 import { writeConfigFile } from '@geekgeekrun/geek-auto-start-chat-with-boss/runtime-file-utils.mjs'
+import { normalizeKeywordList } from '@geekgeekrun/geek-auto-start-chat-with-boss/job-filter.mjs'
 
 export let commonJobConditionConfigWindow: BrowserWindow | null = null
 export function createCommonJobConditionConfigWindow(
@@ -45,6 +46,22 @@ export function createCommonJobConditionConfigWindow(
   })
 
   ipcMain.handle('save-common-job-condition-config', async (_ev, payload) => {
+    if (Object.hasOwn(payload ?? {}, 'blockCompanyKeywordList')) {
+      payload.blockCompanyKeywordList = normalizeKeywordList(payload.blockCompanyKeywordList)
+      // 关键词已取代旧版正则，不再保留正则，避免两套配置同时生效
+      payload.blockCompanyNameRegExpStr = ''
+    }
+    if (Object.hasOwn(payload ?? {}, 'blockJobKeywordList')) {
+      payload.blockJobKeywordList = normalizeKeywordList(payload.blockJobKeywordList)
+    }
+    if (Object.hasOwn(payload ?? {}, 'blockCompanyKeywordExcludeList')) {
+      payload.blockCompanyKeywordExcludeList = normalizeKeywordList(
+        payload.blockCompanyKeywordExcludeList
+      )
+    }
+    if (Object.hasOwn(payload ?? {}, 'blockJobKeywordExcludeList')) {
+      payload.blockJobKeywordExcludeList = normalizeKeywordList(payload.blockJobKeywordExcludeList)
+    }
     await writeConfigFile('common-job-condition-config.json', payload)
     commonJobConditionConfigWindow!.close()
   })

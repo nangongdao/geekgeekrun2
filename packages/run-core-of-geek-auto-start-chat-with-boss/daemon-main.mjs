@@ -15,11 +15,12 @@ const rerunInterval = (() => {
 const __dirname = url.fileURLToPath(new URL('.', import.meta.url))
 function runWithDaemon () {
   const subProcessOfCore = childProcess.spawn(
-    `node`,
-    [path.join(
-      __dirname,
-      'main.mjs'
-    )],
+    process.execPath,
+    [
+      '--import',
+      path.join(__dirname, 'register-hooks.mjs'),
+      path.join(__dirname, 'main.mjs')
+    ],
     {
       stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'ipc'],
       env: {

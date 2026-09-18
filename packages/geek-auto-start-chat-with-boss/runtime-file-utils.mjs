@@ -3,15 +3,16 @@ import fsPromise from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 
-import defaultDingtalkConf from './default-config-file/dingtalk.json' assert {type: 'json'}
-import defaultBossConf from './default-config-file/boss.json' assert {type: 'json'}
-import defaultTargetCompanyListConf from './default-config-file/target-company-list.json' assert {type: 'json'}
-import defaultLlmConf from './default-config-file/llm.json' assert { type: 'json' }
+import defaultDingtalkConf from './default-config-file/dingtalk.json' with { type: 'json' }
+import defaultBossConf from './default-config-file/boss.json' with { type: 'json' }
+import defaultTargetCompanyListConf from './default-config-file/target-company-list.json' with { type: 'json' }
+import defaultLlmConf from './default-config-file/llm.json' with { type: 'json' }
 
-import defaultBossCookieStorage from './default-storage-file/boss-cookies.json' assert { type: 'json' }
-import defaultBossLocalStorageStorage from './default-storage-file/boss-local-storage.json' assert { type: 'json' }
-import defaultJobNotSuitReasonCodeToTextCacheStorage from './default-storage-file/job-not-suit-reason-code-to-text-cache.json' assert { type: 'json' }
-import defaultCommonJobConditionConfig from './default-config-file/common-job-condition-config.json' assert { type: 'json' }
+import defaultBossCookieStorage from './default-storage-file/boss-cookies.json' with { type: 'json' }
+import defaultBossLocalStorageStorage from './default-storage-file/boss-local-storage.json' with { type: 'json' }
+import defaultJobNotSuitReasonCodeToTextCacheStorage from './default-storage-file/job-not-suit-reason-code-to-text-cache.json' with { type: 'json' }
+import defaultCommonJobConditionConfig from './default-config-file/common-job-condition-config.json' with { type: 'json' }
+import { convertLegacyRegExpStrToKeywordList } from './job-filter.mjs'
 export const configFileNameList = ['boss.json', 'dingtalk.json', 'target-company-list.json', 'llm.json', 'common-job-condition-config.json']
 
 const defaultConfigFileContentMap = {
@@ -147,6 +148,66 @@ export const ensureConfigFileExist = () => {
       }
     }
   )
+  migrateConfigFileForKeywordFilter()
+}
+
+/**
+ * 配置文件的幂等迁移，两件事：
+ *
+ * 1. 旧版本用正则 `blockCompanyNameRegExpStr` 表达“不期望投递公司”。
+ *    若正则只是 `a|b|c` 这样的字面量列表，一次性转成 `blockCompanyKeywordList`，
+ *    让用户在界面上直接看到关键词而不是正则；无法安全转换的正则原样保留（运行时仍兼容）。
+ * 2. 补齐新增的关键词相关字段（排除词、职位关键词、匹配范围），
+ *    让老配置文件与默认值对齐，避免“有的机器有这个字段、有的没有”。
+ *
+ * 只在字段缺失时写入，因此是幂等的：跑过一次之后不会再改动文件。
+ */
+const migrateConfigFileForKeywordFilter = () => {
+  for (const fileName of ['boss.json', 'common-job-condition-config.json']) {
+    const filePath = path.join(configFolderPath, fileName)
+    let config
+    try {
+      config = JSON.parse(fs.readFileSync(filePath))
+    } catch {
+      continue
+    }
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      continue
+    }
+    let hasChange = false
+
+    // 1) 旧正则 -> 关键词
+    if (!Array.isArray(config.blockCompanyKeywordList)) {
+      const converted = convertLegacyRegExpStrToKeywordList(config.blockCompanyNameRegExpStr)
+      config.blockCompanyKeywordList = converted ?? []
+      if (converted) {
+        config.blockCompanyNameRegExpStr = ''
+      }
+      hasChange = true
+    }
+
+    // 2) 补齐新增字段
+    const missingDefaults = {
+      blockCompanyKeywordExcludeList: [],
+      blockJobKeywordList: [],
+      blockJobKeywordExcludeList: [],
+      blockJobKeywordMatchFields: ['jobName', 'jobType', 'jobDesc']
+    }
+    for (const [key, defaultValue] of Object.entries(missingDefaults)) {
+      if (Object.hasOwn(config, key)) {
+        continue
+      }
+      config[key] = defaultValue
+      hasChange = true
+    }
+
+    if (!hasChange) {
+      continue
+    }
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(config))
+    } catch {}
+  }
 }
 
 export const readConfigFile = (fileName) => {

@@ -2,3 +2,7 @@ node_modules
 database.sqlite
 .env.local
 
+# 本地运行产物 / 工具产生的本地状态，不入库
+run.log
+.workbuddy/
+

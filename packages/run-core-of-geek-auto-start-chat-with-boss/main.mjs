@@ -88,7 +88,10 @@ const main = async () => {
     sageTimeExit: new AsyncSeriesHook(['args'])
   }
   initPlugins(hooks)
-  await hooks.daemonInitialized.callAsync()
+  // tapable 的异步钩子有两套调用方式：`callAsync(...args, callback)` 需要尾部回调，
+  // 写成 `callAsync()` 会直接抛 `_callback is not a function`；`.promise()` 才是 Promise 形式。
+  // 仓库内统一用 `.promise()`，与 index.mjs 里其它钩子调用保持一致。
+  await hooks.daemonInitialized.promise()
   while (true) {
     try {
       await mainLoop(hooks)

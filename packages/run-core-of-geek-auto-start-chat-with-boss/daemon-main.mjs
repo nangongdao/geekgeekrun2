@@ -1,8 +1,8 @@
-import path from 'node:path'
 import * as url from 'url'
 import { sleep } from '@geekgeekrun/utils/sleep.mjs';
 import childProcess from 'node:child_process';
 import { AUTO_CHAT_ERROR_EXIT_CODE } from './enums.mjs'
+import { buildCoreChildProcessArgs } from './daemon-args.mjs'
 
 const rerunInterval = (() => {
   let v = Number(process.env.MAIN_BOSSGEEKGO_RERUN_INTERVAL)
@@ -16,11 +16,8 @@ const __dirname = url.fileURLToPath(new URL('.', import.meta.url))
 function runWithDaemon () {
   const subProcessOfCore = childProcess.spawn(
     process.execPath,
-    [
-      '--import',
-      path.join(__dirname, 'register-hooks.mjs'),
-      path.join(__dirname, 'main.mjs')
-    ],
+    // 注意：--import 必须是 file:// URL，入口脚本必须是原生路径，两者要求相反，详见 daemon-args.mjs
+    buildCoreChildProcessArgs({ dir: __dirname }),
     {
       stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'ipc'],
       env: {

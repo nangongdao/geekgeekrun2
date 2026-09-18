@@ -10,6 +10,11 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { buildCoreChildProcessArgs } from './daemon-args.mjs'
 
 const core = await import('@geekgeekrun/geek-auto-start-chat-with-boss/index.mjs')
 const enums = await import('@geekgeekrun/sqlite-plugin/dist/enums')
@@ -168,5 +173,71 @@ describe('resolveRecoveryAction（纯函数）', () => {
       consecutiveSoftRecoveryFailureCount: core.MAX_CONSECUTIVE_SOFT_RECOVERY - 1
     })
     assert.match(decision.message, /连续 3 次复用浏览器恢复失败/)
+  })
+})
+
+describe('守护进程启动参数', () => {
+  const dir = fileURLToPath(new URL('.', import.meta.url))
+  const args = buildCoreChildProcessArgs({ dir })
+
+  it('参数形态固定：--import <hooksUrl> <entryPath>', () => {
+    assert.equal(args.length, 3)
+    assert.equal(args[0], '--import')
+  })
+
+  it('--import 必须是 file:// URL（Windows 盘符路径会被当成 URL scheme 而崩溃）', () => {
+    const hooksSpecifier = args[1]
+    assert.match(hooksSpecifier, /^file:\/\//, `--import 不是 file:// URL：${hooksSpecifier}`)
+    assert.equal(new URL(hooksSpecifier).protocol, 'file:')
+    // 回归守卫：曾因传入 `E:\...\register-hooks.mjs` 触发 ERR_UNSUPPORTED_ESM_URL_SCHEME 无限重启
+    assert.doesNotMatch(hooksSpecifier, /^[a-zA-Z]:[\\/]/)
+  })
+
+  it('入口脚本必须是原生路径而不是 file:// URL（URL 会被当成字面路径）', () => {
+    assert.ok(path.isAbsolute(args[2]), `入口不是绝对路径：${args[2]}`)
+    assert.doesNotMatch(args[2], /^file:/)
+    assert.equal(path.basename(args[2]), 'main.mjs')
+  })
+
+  it('两个文件都真实存在（避免改名后参数静默失效）', () => {
+    assert.ok(fs.existsSync(fileURLToPath(args[1])), `hooks 文件不存在：${args[1]}`)
+    assert.ok(fs.existsSync(args[2]), `入口文件不存在：${args[2]}`)
+  })
+
+  it('缺少 dir 时直接抛错，而不是产出坏参数', () => {
+    assert.throws(() => buildCoreChildProcessArgs(), /dir/)
+    assert.throws(() => buildCoreChildProcessArgs({}), /dir/)
+  })
+})
+
+describe('tapable 异步钩子调用约定', () => {
+  const packageDir = fileURLToPath(new URL('.', import.meta.url))
+  const sourceFiles = [
+    path.join(packageDir, 'main.mjs'),
+    path.join(packageDir, '..', 'geek-auto-start-chat-with-boss', 'index.mjs')
+  ]
+
+  it('源码里不得出现 callAsync()（它需要尾部回调，写成 callAsync() 必抛 _callback is not a function）', () => {
+    for (const filePath of sourceFiles) {
+      assert.ok(fs.existsSync(filePath), `源文件不存在：${filePath}`)
+      const source = fs.readFileSync(filePath, 'utf8')
+      const offenders = source
+        .split(/\r?\n/)
+        .map((line, index) => ({ line, lineNumber: index + 1 }))
+        .filter(({ line }) => /\.callAsync\s*\(/.test(line))
+      assert.deepEqual(
+        offenders,
+        [],
+        `${path.basename(filePath)} 里存在 callAsync() 调用，应改为 .promise()：` +
+          offenders.map(({ lineNumber, line }) => `\n  L${lineNumber} ${line.trim()}`).join('')
+      )
+    }
+  })
+
+  it('零 tap 的 AsyncSeriesHook 用 .promise() 能 resolve（当前 tapable 版本的行为基线）', async () => {
+    const { AsyncSeriesHook } = await import('tapable')
+    const hook = new AsyncSeriesHook()
+    await hook.promise()
+    assert.equal(typeof hook.promise, 'function')
   })
 })
